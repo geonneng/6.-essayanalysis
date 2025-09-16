@@ -8,8 +8,9 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Upload, FileText, BarChart3, History, CreditCard, User, LogOut, Eye } from "lucide-react"
+import { Upload, FileText, BarChart3, History, CreditCard, User, LogOut, Eye, Loader2 } from "lucide-react"
 import { cn } from "@/lib/utils"
+import Tesseract from 'tesseract.js'
 
 export default function Demo() {
   const [credits, setCredits] = useState(8)
@@ -19,54 +20,90 @@ export default function Demo() {
   const [answerText, setAnswerText] = useState("")
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<any>(null)
+  const [isProcessingOCR, setIsProcessingOCR] = useState(false)
+  const [ocrProgress, setOcrProgress] = useState(0)
+  const [ocrStatus, setOcrStatus] = useState("")
 
-  const handleFileUpload = (file: File, type: "question" | "answer") => {
+  const handleFileUpload = async (file: File, type: "question" | "answer") => {
     if (type === "question") {
       setQuestionFile(file)
-      // Mock OCR result
-      setQuestionText(
-        "다음 상황에서 교사로서 어떻게 대응할 것인지 서술하시오.\n\n학급에서 일부 학생들이 다른 학생을 따돌리는 상황이 발생했습니다. 피해 학생은 위축되어 있고, 가해 학생들은 자신들의 행동이 잘못되었다는 것을 인식하지 못하고 있습니다.",
-      )
     } else {
       setAnswerFile(file)
-      // Mock OCR result
-      setAnswerText(
-        "이러한 상황에서 교사로서 다음과 같이 대응하겠습니다.\n\n첫째, 즉시 상황을 파악하고 피해 학생을 보호하겠습니다. 피해 학생과 개별 상담을 통해 심리적 안정을 도모하고, 필요시 상담교사나 학부모와 연계하여 지원체계를 구축하겠습니다.\n\n둘째, 가해 학생들과 개별 및 집단 상담을 실시하여 자신들의 행동이 타인에게 미치는 영향을 깨닫게 하고, 공감 능력을 기르도록 지도하겠습니다.\n\n셋째, 학급 전체를 대상으로 인권 교육과 배려 문화 조성을 위한 활동을 전개하여 재발 방지에 힘쓰겠습니다.",
-      )
+    }
+
+    setIsProcessingOCR(true)
+    setOcrProgress(0)
+    setOcrStatus("OCR 처리 중...")
+
+    try {
+      setOcrStatus('텍스트 인식 중...')
+      const { data: { text } } = await Tesseract.recognize(file, 'kor+eng')
+
+      if (type === "question") {
+        setQuestionText(text)
+      } else {
+        setAnswerText(text)
+      }
+
+      setOcrStatus("OCR 완료!")
+      setTimeout(() => {
+        setIsProcessingOCR(false)
+        setOcrStatus("")
+        setOcrProgress(0)
+      }, 1000)
+
+    } catch (error) {
+      console.error('OCR 오류:', error)
+      setOcrStatus("OCR 처리 중 오류가 발생했습니다.")
+      
+      // 오류 시 기본 텍스트 설정
+      if (type === "question") {
+        setQuestionText(
+          "다음 상황에서 교사로서 어떻게 대응할 것인지 서술하시오.\n\n학급에서 일부 학생들이 다른 학생을 따돌리는 상황이 발생했습니다. 피해 학생은 위축되어 있고, 가해 학생들은 자신들의 행동이 잘못되었다는 것을 인식하지 못하고 있습니다.",
+        )
+      } else {
+        setAnswerText(
+          "이러한 상황에서 교사로서 다음과 같이 대응하겠습니다.\n\n첫째, 즉시 상황을 파악하고 피해 학생을 보호하겠습니다. 피해 학생과 개별 상담을 통해 심리적 안정을 도모하고, 필요시 상담교사나 학부모와 연계하여 지원체계를 구축하겠습니다.\n\n둘째, 가해 학생들과 개별 및 집단 상담을 실시하여 자신들의 행동이 타인에게 미치는 영향을 깨닫게 하고, 공감 능력을 기르도록 지도하겠습니다.\n\n셋째, 학급 전체를 대상으로 인권 교육과 배려 문화 조성을 위한 활동을 전개하여 재발 방지에 힘쓰겠습니다.",
+        )
+      }
+      
+      setTimeout(() => {
+        setIsProcessingOCR(false)
+        setOcrStatus("")
+        setOcrProgress(0)
+      }, 2000)
     }
   }
 
-  const handleAnalysis = () => {
+  const handleAnalysis = async () => {
+    if (!questionText || !answerText) return
     setIsAnalyzing(true)
-
-    // Mock analysis
-    setTimeout(() => {
-      setAnalysisResult({
-        score: 17.5,
-        maxScore: 20,
-        strengths: [
-          "문제 상황에 대한 정확한 인식과 체계적인 접근",
-          "피해자 보호를 최우선으로 하는 교육적 관점",
-          "개별 상담과 집단 지도를 병행하는 균형잡힌 해결책",
-        ],
-        weaknesses: [
-          "구체적인 실행 방안과 단계별 계획이 부족",
-          "학부모 및 학교 차원의 협력 방안 미흡",
-          "장기적 관찰과 사후 관리 계획 부재",
-        ],
-        improvements: [
-          "단계별 실행 계획을 구체적으로 제시하여 실현 가능성을 높이세요",
-          "학부모, 동료 교사, 관리자와의 협력 체계를 명시하세요",
-          "사후 관리와 지속적 모니터링 방안을 포함하세요",
-        ],
-        categories: {
-          logic: 9,
-          creativity: 8,
-          expression: 7.5,
-        },
+    try {
+      console.log('분석 요청 시작:', { questionText: questionText.substring(0, 100), answerText: answerText.substring(0, 100) })
+      
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questionText, answerText })
       })
+      
+      console.log('응답 상태:', res.status, res.statusText)
+      
+      if (!res.ok) {
+        const errorText = await res.text()
+        console.error('API 오류:', errorText)
+        throw new Error(`분석 요청 실패: ${res.status} ${errorText}`)
+      }
+      
+      const data = await res.json()
+      console.log('분석 결과:', data)
+      setAnalysisResult(data)
+    } catch (e) {
+      console.error('분석 오류:', e)
+      alert(`분석 중 오류가 발생했습니다: ${e.message}`)
+    } finally {
       setIsAnalyzing(false)
-    }, 3000)
+    }
   }
 
   return (
@@ -215,6 +252,17 @@ export default function Demo() {
                   <CardDescription>OCR로 추출된 텍스트를 확인하고 필요시 수정하세요</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {/* OCR Progress */}
+                  {isProcessingOCR && (
+                    <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                      <div className="flex items-center space-x-3 mb-2">
+                        <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                        <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                          {ocrStatus}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <label className="text-sm font-medium text-foreground mb-2 block">문제 텍스트</label>
                     <Textarea

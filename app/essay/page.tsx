@@ -41,7 +41,7 @@ export default function EssayPage() {
     }
   }
 
-  const handleAnalysis = () => {
+  const handleAnalysis = async () => {
     if (!questionText || !answerText) {
       alert("문제와 답안을 모두 입력해주세요.")
       return
@@ -54,31 +54,28 @@ export default function EssayPage() {
 
     setIsAnalyzing(true)
 
-    // Mock analysis
-    setTimeout(() => {
+    try {
+      console.log('분석 요청 시작:', { questionText: questionText.substring(0, 100), answerText: answerText.substring(0, 100) })
+      
+      const res = await fetch('/api/analyze', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ questionText, answerText })
+      })
+      
+      console.log('응답 상태:', res.status, res.statusText)
+      
+      if (!res.ok) {
+        const errorText = await res.text()
+        console.error('API 오류:', errorText)
+        throw new Error(`분석 요청 실패: ${res.status} ${errorText}`)
+      }
+      
+      const data = await res.json()
+      console.log('분석 결과:', data)
+      
       const result = {
-        score: 17.5,
-        maxScore: 20,
-        strengths: [
-          "문제 상황에 대한 정확한 인식과 체계적인 접근",
-          "피해자 보호를 최우선으로 하는 교육적 관점",
-          "개별 상담과 집단 지도를 병행하는 균형잡힌 해결책",
-        ],
-        weaknesses: [
-          "구체적인 실행 방안과 단계별 계획이 부족",
-          "학부모 및 학교 차원의 협력 방안 미흡",
-          "장기적 관찰과 사후 관리 계획 부재",
-        ],
-        improvements: [
-          "단계별 실행 계획을 구체적으로 제시하여 실현 가능성을 높이세요",
-          "학부모, 동료 교사, 관리자와의 협력 체계를 명시하세요",
-          "사후 관리와 지속적 모니터링 방안을 포함하세요",
-        ],
-        categories: {
-          logic: 9,
-          creativity: 8,
-          expression: 7.5,
-        },
+        ...data,
         questionTitle: questionText.split('\n')[0] || "논술 문제",
         analysisDate: new Date().toLocaleDateString('ko-KR'),
         questionText,
@@ -86,7 +83,6 @@ export default function EssayPage() {
       }
       
       setAnalysisResult(result)
-      setIsAnalyzing(false)
       setCredits(prev => prev - 1)
       
       // 분석 히스토리에 추가
@@ -102,7 +98,13 @@ export default function EssayPage() {
       
       // /analysis 페이지로 이동
       router.push('/analysis')
-    }, 3000)
+      
+    } catch (e) {
+      console.error('분석 오류:', e)
+      alert(`분석 중 오류가 발생했습니다: ${e.message}`)
+    } finally {
+      setIsAnalyzing(false)
+    }
   }
 
   const handleSignOut = async () => {

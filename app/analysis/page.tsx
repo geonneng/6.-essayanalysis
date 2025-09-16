@@ -6,7 +6,7 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { ArrowLeft, BarChart3, Download, Share2 } from "lucide-react"
+import { ArrowLeft, BarChart3, Download, Share2, FileText, CheckCircle, AlertTriangle, Lightbulb } from "lucide-react"
 import { useRouter } from "next/navigation"
 
 export default function AnalysisResults() {
@@ -163,10 +163,38 @@ export default function AnalysisResults() {
 
           {/* Detailed Analysis */}
           <div className="grid md:grid-cols-1 gap-6">
+            {/* Original Question and Answer */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <FileText className="w-5 h-5" />
+                  <span>원본 문제 및 답안</span>
+                </CardTitle>
+                <CardDescription>분석된 논술 문제와 작성한 답안입니다</CardDescription>
+              </CardHeader>
+              <CardContent className="space-y-4">
+                <div>
+                  <h4 className="font-semibold text-foreground mb-2">문제</h4>
+                  <div className="p-4 bg-muted/30 rounded-lg">
+                    <p className="text-foreground whitespace-pre-wrap">{analysisResult.questionText}</p>
+                  </div>
+                </div>
+                <div>
+                  <h4 className="font-semibold text-foreground mb-2">답안</h4>
+                  <div className="p-4 bg-muted/30 rounded-lg">
+                    <p className="text-foreground whitespace-pre-wrap">{analysisResult.answerText}</p>
+                  </div>
+                </div>
+              </CardContent>
+            </Card>
+
             {/* Strengths */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-green-600">주요 강점</CardTitle>
+                <CardTitle className="text-green-600 flex items-center space-x-2">
+                  <CheckCircle className="w-5 h-5" />
+                  <span>주요 강점</span>
+                </CardTitle>
                 <CardDescription>답안에서 잘 작성된 부분들입니다</CardDescription>
               </CardHeader>
               <CardContent>
@@ -174,12 +202,14 @@ export default function AnalysisResults() {
                   {analysisResult.strengths.map((strength: string, index: number) => (
                     <li
                       key={index}
-                      className="flex items-start space-x-3 p-3 bg-green-50 dark:bg-green-950/20 rounded-lg"
+                      className="flex items-start space-x-3 p-4 bg-green-50 dark:bg-green-950/20 rounded-lg border border-green-200 dark:border-green-800"
                     >
-                      <div className="w-6 h-6 bg-green-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <div className="w-7 h-7 bg-green-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
                         <span className="text-white text-sm font-bold">{index + 1}</span>
                       </div>
-                      <span className="text-foreground leading-relaxed">{strength}</span>
+                      <div className="flex-1">
+                        <span className="text-foreground leading-relaxed text-sm">{strength}</span>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -189,7 +219,10 @@ export default function AnalysisResults() {
             {/* Weaknesses */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-orange-600">보완이 필요한 부분</CardTitle>
+                <CardTitle className="text-orange-600 flex items-center space-x-2">
+                  <AlertTriangle className="w-5 h-5" />
+                  <span>보완이 필요한 부분</span>
+                </CardTitle>
                 <CardDescription>개선할 수 있는 영역들입니다</CardDescription>
               </CardHeader>
               <CardContent>
@@ -197,12 +230,14 @@ export default function AnalysisResults() {
                   {analysisResult.weaknesses.map((weakness: string, index: number) => (
                     <li
                       key={index}
-                      className="flex items-start space-x-3 p-3 bg-orange-50 dark:bg-orange-950/20 rounded-lg"
+                      className="flex items-start space-x-3 p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800"
                     >
-                      <div className="w-6 h-6 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <div className="w-7 h-7 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
                         <span className="text-white text-sm font-bold">{index + 1}</span>
                       </div>
-                      <span className="text-foreground leading-relaxed">{weakness}</span>
+                      <div className="flex-1">
+                        <span className="text-foreground leading-relaxed text-sm">{weakness}</span>
+                      </div>
                     </li>
                   ))}
                 </ul>
@@ -212,7 +247,10 @@ export default function AnalysisResults() {
             {/* Improvements */}
             <Card>
               <CardHeader>
-                <CardTitle className="text-blue-600">구체적 개선 방안</CardTitle>
+                <CardTitle className="text-blue-600 flex items-center space-x-2">
+                  <Lightbulb className="w-5 h-5" />
+                  <span>구체적 개선 방안</span>
+                </CardTitle>
                 <CardDescription>다음 논술 작성 시 참고할 수 있는 개선 방향입니다</CardDescription>
               </CardHeader>
               <CardContent>
@@ -220,15 +258,62 @@ export default function AnalysisResults() {
                   {analysisResult.improvements.map((improvement: string, index: number) => (
                     <li
                       key={index}
-                      className="flex items-start space-x-3 p-3 bg-blue-50 dark:bg-blue-950/20 rounded-lg"
+                      className="flex items-start space-x-3 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800"
                     >
-                      <div className="w-6 h-6 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <div className="w-7 h-7 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
                         <span className="text-white text-sm font-bold">{index + 1}</span>
                       </div>
-                      <span className="text-foreground leading-relaxed">{improvement}</span>
+                      <div className="flex-1">
+                        <span className="text-foreground leading-relaxed text-sm">{improvement}</span>
+                      </div>
                     </li>
                   ))}
                 </ul>
+              </CardContent>
+            </Card>
+
+            {/* Score Breakdown */}
+            <Card>
+              <CardHeader>
+                <CardTitle className="flex items-center space-x-2">
+                  <BarChart3 className="w-5 h-5" />
+                  <span>점수 상세 분석</span>
+                </CardTitle>
+                <CardDescription>각 평가 기준별 상세 점수와 분석입니다</CardDescription>
+              </CardHeader>
+              <CardContent>
+                <div className="space-y-6">
+                  <div className="grid md:grid-cols-3 gap-4">
+                    <div className="text-center p-4 bg-muted/30 rounded-lg">
+                      <div className="text-3xl font-bold text-primary mb-2">{analysisResult.categories.logic}/10</div>
+                      <p className="font-medium mb-2">논리성</p>
+                      <Progress value={analysisResult.categories.logic * 10} className="h-2" />
+                      <p className="text-xs text-muted-foreground mt-2">논리적 구조와 전개</p>
+                    </div>
+                    <div className="text-center p-4 bg-muted/30 rounded-lg">
+                      <div className="text-3xl font-bold text-secondary mb-2">{analysisResult.categories.creativity}/10</div>
+                      <p className="font-medium mb-2">창의성</p>
+                      <Progress value={analysisResult.categories.creativity * 10} className="h-2" />
+                      <p className="text-xs text-muted-foreground mt-2">독창적 아이디어와 접근</p>
+                    </div>
+                    <div className="text-center p-4 bg-muted/30 rounded-lg">
+                      <div className="text-3xl font-bold text-accent mb-2">{analysisResult.categories.expression}/10</div>
+                      <p className="font-medium mb-2">표현력</p>
+                      <Progress value={analysisResult.categories.expression * 10} className="h-2" />
+                      <p className="text-xs text-muted-foreground mt-2">문장력과 가독성</p>
+                    </div>
+                  </div>
+                  
+                  <div className="p-4 bg-muted/30 rounded-lg">
+                    <h4 className="font-semibold text-foreground mb-2">종합 평가</h4>
+                    <p className="text-sm text-foreground">
+                      총 {analysisResult.score}점으로 {analysisResult.maxScore}점 만점 중 {Math.round((analysisResult.score / analysisResult.maxScore) * 100)}%를 획득했습니다.
+                      {analysisResult.score >= 16 ? " 우수한 수준의 논술입니다." : 
+                       analysisResult.score >= 12 ? " 보통 수준의 논술입니다." : 
+                       " 개선이 필요한 논술입니다."}
+                    </p>
+                  </div>
+                </div>
               </CardContent>
             </Card>
           </div>
