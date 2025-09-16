@@ -24,6 +24,7 @@ export default function EssayPage() {
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<any>(null)
   const [analysisHistory, setAnalysisHistory] = useState<any[]>([])
+  const [retryableError, setRetryableError] = useState<string | null>(null)
 
   const handleFileUpload = (file: File, type: "question" | "answer") => {
     if (type === "question") {
@@ -53,6 +54,7 @@ export default function EssayPage() {
     }
 
     setIsAnalyzing(true)
+    setRetryableError(null) // 이전 오류 상태 초기화
 
     try {
       console.log('분석 요청 시작:', { questionText: questionText.substring(0, 100), answerText: answerText.substring(0, 100) })
@@ -93,15 +95,56 @@ export default function EssayPage() {
       }
       setAnalysisHistory(prev => [newHistoryItem, ...prev])
       
-      // 분석 결과를 세션 스토리지에 저장
-      sessionStorage.setItem('latestAnalysisResult', JSON.stringify(result))
+      // 분석 결과와 함께 문제/답안 텍스트도 저장
+      const analysisData = {
+        ...result,
+        questionText,
+        answerText,
+        analysisDate: new Date().toLocaleDateString('ko-KR', {
+          year: 'numeric',
+          month: 'long',
+          day: 'numeric'
+        }),
+        questionTitle: questionText.substring(0, 50) + (questionText.length > 50 ? '...' : '')
+      }
       
-      // /analysis 페이지로 이동
+      // 분석 결과를 세션 스토리지에 저장
+      console.log('저장할 분석 데이터:', analysisData)
+      sessionStorage.setItem('latestAnalysisResult', JSON.stringify(analysisData))
+      
+      // 저장 확인
+      const savedData = sessionStorage.getItem('latestAnalysisResult')
+      console.log('세션 스토리지에 저장된 데이터:', savedData)
+      
+      // /analysis 페이지로 이동 (세션 스토리지만 사용)
       router.push('/analysis')
       
-    } catch (e) {
+    } catch (e: any) {
       console.error('분석 오류:', e)
-      alert(`분석 중 오류가 발생했습니다: ${e.message}`)
+      
+      // API 응답에서 오류 정보 추출
+      let errorMessage = '분석 중 오류가 발생했습니다.'
+      let isRetryable = false
+      
+      if (e.message) {
+        try {
+          const errorData = JSON.parse(e.message)
+          if (errorData.error) {
+            errorMessage = errorData.error
+            isRetryable = errorData.retryable || false
+          }
+        } catch {
+          // JSON 파싱 실패 시 원본 메시지 사용
+          errorMessage = e.message
+        }
+      }
+      
+      if (isRetryable) {
+        // 재시도 가능한 오류인 경우 상태에 저장하고 사용자에게 재시도 버튼 제공
+        setRetryableError(errorMessage)
+      } else {
+        alert(errorMessage)
+      }
     } finally {
       setIsAnalyzing(false)
     }
@@ -113,9 +156,10 @@ export default function EssayPage() {
   }
 
   const handleViewAnalysis = (analysisItem: any) => {
-    // 선택된 분석 결과를 세션 스토리지에 저장
+    console.log('히스토리에서 선택된 분석 아이템:', analysisItem)
+    // 세션 스토리지에 저장 (이전 데이터 덮어쓰기)
     sessionStorage.setItem('latestAnalysisResult', JSON.stringify(analysisItem))
-    // /analysis 페이지로 이동
+    console.log('히스토리 데이터를 세션 스토리지에 저장 완료')
     router.push('/analysis')
   }
 
@@ -276,6 +320,44 @@ export default function EssayPage() {
                   >
                     {isAnalyzing ? "분석 중..." : `논술 분석 시작하기 (1 크레딧 소모)`}
                   </Button>
+                  
+                  {/* 재시도 가능한 오류 메시지 및 재시도 버튼 */}
+                  {retryableError && (
+                    <div className="mt-4 p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                      <div className="flex items-start space-x-3">
+                        <div className="w-5 h-5 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <span className="text-white text-xs">!</span>
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-sm text-orange-800 dark:text-orange-200 mb-2">
+                            {retryableError}
+                          </p>
+                          <div className="text-xs text-orange-700 dark:text-orange-300 mb-3 space-y-1">
+                            <p>• AI 서버가 일시적으로 과부하 상태입니다</p>
+                            <p>• 보통 5-10분 후에 정상화됩니다</p>
+                            <p>• 오전 시간대나 사용자가 적은 시간에 시도해보세요</p>
+                          </div>
+                          <div className="flex space-x-2">
+                            <Button
+                              onClick={handleAnalysis}
+                              disabled={isAnalyzing}
+                              size="sm"
+                              className="bg-orange-500 hover:bg-orange-600 text-white"
+                            >
+                              {isAnalyzing ? "재시도 중..." : "다시 시도하기"}
+                            </Button>
+                            <Button
+                              onClick={() => setRetryableError(null)}
+                              variant="outline"
+                              size="sm"
+                            >
+                              닫기
+                            </Button>
+                          </div>
+                        </div>
+                      </div>
+                    </div>
+                  )}
                 </CardContent>
               </Card>
             </div>

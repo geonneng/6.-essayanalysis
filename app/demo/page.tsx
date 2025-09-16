@@ -98,9 +98,31 @@ export default function Demo() {
       const data = await res.json()
       console.log('분석 결과:', data)
       setAnalysisResult(data)
-    } catch (e) {
+    } catch (e: any) {
       console.error('분석 오류:', e)
-      alert(`분석 중 오류가 발생했습니다: ${e.message}`)
+      
+      // API 응답에서 오류 정보 추출
+      let errorMessage = '분석 중 오류가 발생했습니다.'
+      let isRetryable = false
+      
+      if (e.message) {
+        try {
+          const errorData = JSON.parse(e.message)
+          if (errorData.error) {
+            errorMessage = errorData.error
+            isRetryable = errorData.retryable || false
+          }
+        } catch {
+          // JSON 파싱 실패 시 원본 메시지 사용
+          errorMessage = e.message
+        }
+      }
+      
+      if (isRetryable) {
+        alert(`${errorMessage}\n\n잠시 후 다시 시도해주세요.`)
+      } else {
+        alert(errorMessage)
+      }
     } finally {
       setIsAnalyzing(false)
     }

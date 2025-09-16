@@ -16,51 +16,60 @@ export default function AnalysisResults() {
   useEffect(() => {
     // 세션 스토리지에서 분석 결과 가져오기
     const storedResult = sessionStorage.getItem('latestAnalysisResult')
+    console.log('세션 스토리지에서 읽어온 데이터:', storedResult)
     
     if (storedResult) {
       try {
         const parsedResult = JSON.parse(storedResult)
+        console.log('세션 스토리지에서 파싱된 분석 결과:', parsedResult)
         setAnalysisResult(parsedResult)
-        // 사용 후 세션 스토리지에서 제거
-        sessionStorage.removeItem('latestAnalysisResult')
+        // 세션 스토리지에서 제거하지 않음 (페이지 새로고침 시에도 유지)
       } catch (error) {
         console.error('분석 결과 파싱 오류:', error)
         // 파싱 실패 시 기본값 사용
         setDefaultResult()
       }
     } else {
+      console.log('세션 스토리지에 데이터가 없음')
       // 세션 스토리지에 데이터가 없으면 기본값 사용
       setDefaultResult()
     }
   }, [])
 
   const setDefaultResult = () => {
+    // 세션 스토리지에 데이터가 없을 때만 기본값 사용
     setAnalysisResult({
-      score: 17.5,
+      score: 0,
       maxScore: 20,
-      strengths: [
-        "문제 상황에 대한 정확한 인식과 체계적인 접근",
-        "피해자 보호를 최우선으로 하는 교육적 관점",
-        "개별 상담과 집단 지도를 병행하는 균형잡힌 해결책",
-      ],
-      weaknesses: [
-        "구체적인 실행 방안과 단계별 계획이 부족",
-        "학부모 및 학교 차원의 협력 방안 미흡",
-        "장기적 관찰과 사후 관리 계획 부재",
-      ],
-      improvements: [
-        "단계별 실행 계획을 구체적으로 제시하여 실현 가능성을 높이세요",
-        "학부모, 동료 교사, 관리자와의 협력 체계를 명시하세요",
-        "사후 관리와 지속적 모니터링 방안을 포함하세요",
-      ],
-      categories: {
-        logic: 9,
-        creativity: 8,
-        expression: 7.5,
+      strengths: ["분석 데이터가 없습니다."],
+      weaknesses: ["분석 데이터가 없습니다."],
+      improvements: ["분석 데이터가 없습니다."],
+      detailedAnalysis: {
+        contentAnalysis: "분석할 논술 내용이 없습니다. /essay 페이지에서 먼저 분석을 진행해주세요.",
+        structureAnalysis: "분석할 논술 체계가 없습니다. /essay 페이지에서 먼저 분석을 진행해주세요.",
+        educationalPerspective: "교육적 관점 분석 데이터가 없습니다. /essay 페이지에서 먼저 분석을 진행해주세요.",
+        educationalTheory: "교육학 이론 관점 분석 데이터가 없습니다. /essay 페이지에서 먼저 분석을 진행해주세요.",
       },
-      analysisDate: "2025년 1월 15일",
-      questionTitle: "학급 내 따돌림 상황 대응 방안",
+      categories: {
+        logicalStructure: 0,
+        spelling: 0,
+        vocabulary: 0,
+      },
+      analysisDate: new Date().toLocaleDateString('ko-KR', {
+        year: 'numeric',
+        month: 'long',
+        day: 'numeric'
+      }),
+      questionTitle: "분석 데이터 없음",
+      questionText: "분석할 문제가 없습니다. /essay 페이지에서 먼저 분석을 진행해주세요.",
+      answerText: "분석할 답안이 없습니다. /essay 페이지에서 먼저 분석을 진행해주세요.",
     })
+  }
+
+  const handleNewAnalysis = () => {
+    // 새로운 분석을 시작할 때 세션 스토리지 정리
+    sessionStorage.removeItem('latestAnalysisResult')
+    router.push('/essay')
   }
 
   if (!analysisResult) {
@@ -124,10 +133,17 @@ export default function AnalysisResults() {
                 <div className="text-5xl font-bold text-primary mb-4">
                   {analysisResult.score}/{analysisResult.maxScore}
                 </div>
-                <Badge variant="secondary" className="text-lg px-4 py-2">
-                  우수한 수준
+                <Badge variant={analysisResult.score > 0 ? "secondary" : "destructive"} className="text-lg px-4 py-2">
+                  {analysisResult.score > 0 ? 
+                    (analysisResult.score >= 16 ? "우수한 수준" : 
+                     analysisResult.score >= 12 ? "보통 수준" : "개선 필요") : 
+                    "분석 데이터 없음"}
                 </Badge>
-                <p className="text-muted-foreground mt-2">전체 평균보다 높은 점수입니다</p>
+                <p className="text-muted-foreground mt-2">
+                  {analysisResult.score > 0 ? 
+                    "전체 평균보다 높은 점수입니다" : 
+                    "분석을 먼저 진행해주세요"}
+                </p>
               </div>
             </CardContent>
           </Card>
@@ -141,21 +157,21 @@ export default function AnalysisResults() {
             <CardContent className="space-y-6">
               <div className="grid md:grid-cols-3 gap-6">
                 <div className="text-center p-4 bg-muted/30 rounded-lg">
-                  <div className="text-2xl font-bold text-primary mb-2">{analysisResult.categories.logic}/10</div>
-                  <p className="font-medium mb-2">논리성</p>
-                  <Progress value={analysisResult.categories.logic * 10} className="h-2" />
+                  <div className="text-2xl font-bold text-primary mb-2">{analysisResult.categories.logicalStructure}/10</div>
+                  <p className="font-medium mb-2">논리적 체계성</p>
+                  <Progress value={analysisResult.categories.logicalStructure * 10} className="h-2" />
                 </div>
                 <div className="text-center p-4 bg-muted/30 rounded-lg">
                   <div className="text-2xl font-bold text-secondary mb-2">
-                    {analysisResult.categories.creativity}/10
+                    {analysisResult.categories.spelling}/10
                   </div>
-                  <p className="font-medium mb-2">창의성</p>
-                  <Progress value={analysisResult.categories.creativity * 10} className="h-2" />
+                  <p className="font-medium mb-2">맞춤법</p>
+                  <Progress value={analysisResult.categories.spelling * 10} className="h-2" />
                 </div>
                 <div className="text-center p-4 bg-muted/30 rounded-lg">
-                  <div className="text-2xl font-bold text-accent mb-2">{analysisResult.categories.expression}/10</div>
-                  <p className="font-medium mb-2">표현력</p>
-                  <Progress value={analysisResult.categories.expression * 10} className="h-2" />
+                  <div className="text-2xl font-bold text-accent mb-2">{analysisResult.categories.vocabulary}/10</div>
+                  <p className="font-medium mb-2">어휘 및 문장의 적절성</p>
+                  <Progress value={analysisResult.categories.vocabulary * 10} className="h-2" />
                 </div>
               </div>
             </CardContent>
@@ -272,6 +288,51 @@ export default function AnalysisResults() {
               </CardContent>
             </Card>
 
+            {/* Detailed Analysis */}
+            {analysisResult.detailedAnalysis && (
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <FileText className="w-5 h-5" />
+                    <span>상세 분석 결과</span>
+                  </CardTitle>
+                  <CardDescription>배점 기준에 따른 종합적이고 상세한 분석입니다</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-6">
+                  <div className="grid md:grid-cols-2 gap-6">
+                    <div className="space-y-4">
+                      <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                        <h4 className="font-semibold text-blue-800 dark:text-blue-200 mb-2">논술 내용 분석</h4>
+                        <p className="text-sm text-blue-700 dark:text-blue-300 leading-relaxed">
+                          {analysisResult.detailedAnalysis.contentAnalysis}
+                        </p>
+                      </div>
+                      <div className="p-4 bg-green-50 dark:bg-green-950/20 rounded-lg border border-green-200 dark:border-green-800">
+                        <h4 className="font-semibold text-green-800 dark:text-green-200 mb-2">논술 체계 분석</h4>
+                        <p className="text-sm text-green-700 dark:text-green-300 leading-relaxed">
+                          {analysisResult.detailedAnalysis.structureAnalysis}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="space-y-4">
+                      <div className="p-4 bg-purple-50 dark:bg-purple-950/20 rounded-lg border border-purple-200 dark:border-purple-800">
+                        <h4 className="font-semibold text-purple-800 dark:text-purple-200 mb-2">교육적 관점 평가</h4>
+                        <p className="text-sm text-purple-700 dark:text-purple-300 leading-relaxed">
+                          {analysisResult.detailedAnalysis.educationalPerspective}
+                        </p>
+                      </div>
+                      <div className="p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                        <h4 className="font-semibold text-orange-800 dark:text-orange-200 mb-2">교육학 이론 관점 평가</h4>
+                        <p className="text-sm text-orange-700 dark:text-orange-300 leading-relaxed">
+                          {analysisResult.detailedAnalysis.educationalTheory}
+                        </p>
+                      </div>
+                    </div>
+                  </div>
+                </CardContent>
+              </Card>
+            )}
+
             {/* Score Breakdown */}
             <Card>
               <CardHeader>
@@ -285,22 +346,22 @@ export default function AnalysisResults() {
                 <div className="space-y-6">
                   <div className="grid md:grid-cols-3 gap-4">
                     <div className="text-center p-4 bg-muted/30 rounded-lg">
-                      <div className="text-3xl font-bold text-primary mb-2">{analysisResult.categories.logic}/10</div>
-                      <p className="font-medium mb-2">논리성</p>
-                      <Progress value={analysisResult.categories.logic * 10} className="h-2" />
-                      <p className="text-xs text-muted-foreground mt-2">논리적 구조와 전개</p>
+                      <div className="text-3xl font-bold text-primary mb-2">{analysisResult.categories.logicalStructure}/10</div>
+                      <p className="font-medium mb-2">논리적 체계성</p>
+                      <Progress value={analysisResult.categories.logicalStructure * 10} className="h-2" />
+                      <p className="text-xs text-muted-foreground mt-2">논리적 구조와 전개 방식</p>
                     </div>
                     <div className="text-center p-4 bg-muted/30 rounded-lg">
-                      <div className="text-3xl font-bold text-secondary mb-2">{analysisResult.categories.creativity}/10</div>
-                      <p className="font-medium mb-2">창의성</p>
-                      <Progress value={analysisResult.categories.creativity * 10} className="h-2" />
-                      <p className="text-xs text-muted-foreground mt-2">독창적 아이디어와 접근</p>
+                      <div className="text-3xl font-bold text-secondary mb-2">{analysisResult.categories.spelling}/10</div>
+                      <p className="font-medium mb-2">맞춤법</p>
+                      <Progress value={analysisResult.categories.spelling * 10} className="h-2" />
+                      <p className="text-xs text-muted-foreground mt-2">맞춤법과 띄어쓰기 정확성</p>
                     </div>
                     <div className="text-center p-4 bg-muted/30 rounded-lg">
-                      <div className="text-3xl font-bold text-accent mb-2">{analysisResult.categories.expression}/10</div>
-                      <p className="font-medium mb-2">표현력</p>
-                      <Progress value={analysisResult.categories.expression * 10} className="h-2" />
-                      <p className="text-xs text-muted-foreground mt-2">문장력과 가독성</p>
+                      <div className="text-3xl font-bold text-accent mb-2">{analysisResult.categories.vocabulary}/10</div>
+                      <p className="font-medium mb-2">어휘 및 문장의 적절성</p>
+                      <Progress value={analysisResult.categories.vocabulary * 10} className="h-2" />
+                      <p className="text-xs text-muted-foreground mt-2">어휘 선택과 문장 구성</p>
                     </div>
                   </div>
                   
@@ -320,12 +381,14 @@ export default function AnalysisResults() {
 
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row gap-4 pt-6">
-            <Link href="/essay" className="flex-1">
-              <Button variant="outline" className="w-full bg-transparent">
-                <ArrowLeft className="w-4 h-4 mr-2" />
-                새로운 분석 시작하기
-              </Button>
-            </Link>
+            <Button 
+              onClick={handleNewAnalysis}
+              variant="outline" 
+              className="flex-1 bg-transparent"
+            >
+              <ArrowLeft className="w-4 h-4 mr-2" />
+              새로운 분석 시작하기
+            </Button>
             <Button className="flex-1">
               <Download className="w-4 h-4 mr-2" />
               결과 저장하기
