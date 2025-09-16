@@ -1,4 +1,4 @@
-"use client"
+'use client'
 
 import { useState, useEffect } from "react"
 import Link from "next/link"
@@ -7,12 +7,34 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/com
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { ArrowLeft, BarChart3, Download, Share2 } from "lucide-react"
+import { useRouter } from "next/navigation"
 
 export default function AnalysisResults() {
+  const router = useRouter()
   const [analysisResult, setAnalysisResult] = useState<any>(null)
 
   useEffect(() => {
-    // Mock analysis result - in real app, this would come from props or API
+    // 세션 스토리지에서 분석 결과 가져오기
+    const storedResult = sessionStorage.getItem('latestAnalysisResult')
+    
+    if (storedResult) {
+      try {
+        const parsedResult = JSON.parse(storedResult)
+        setAnalysisResult(parsedResult)
+        // 사용 후 세션 스토리지에서 제거
+        sessionStorage.removeItem('latestAnalysisResult')
+      } catch (error) {
+        console.error('분석 결과 파싱 오류:', error)
+        // 파싱 실패 시 기본값 사용
+        setDefaultResult()
+      }
+    } else {
+      // 세션 스토리지에 데이터가 없으면 기본값 사용
+      setDefaultResult()
+    }
+  }, [])
+
+  const setDefaultResult = () => {
     setAnalysisResult({
       score: 17.5,
       maxScore: 20,
@@ -39,7 +61,7 @@ export default function AnalysisResults() {
       analysisDate: "2025년 1월 15일",
       questionTitle: "학급 내 따돌림 상황 대응 방안",
     })
-  }, [])
+  }
 
   if (!analysisResult) {
     return (
@@ -213,7 +235,7 @@ export default function AnalysisResults() {
 
           {/* Action Buttons */}
           <div className="flex flex-col sm:flex-row gap-4 pt-6">
-            <Link href="/dashboard" className="flex-1">
+            <Link href="/essay" className="flex-1">
               <Button variant="outline" className="w-full bg-transparent">
                 <ArrowLeft className="w-4 h-4 mr-2" />
                 새로운 분석 시작하기

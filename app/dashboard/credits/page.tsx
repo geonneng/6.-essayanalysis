@@ -41,9 +41,9 @@ export default function CreditsPage() {
               </Badge>
             </div>
             <Button variant="outline" size="sm" asChild>
-              <Link href="/dashboard">
+              <Link href="/">
                 <ArrowLeft className="w-4 h-4 mr-2" />
-                대시보드로
+                홈으로
               </Link>
             </Button>
           </div>

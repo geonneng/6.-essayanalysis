@@ -2,12 +2,23 @@
 
 import { ProtectedRoute } from '@/components/auth/ProtectedRoute'
 import { UserProfile } from '@/components/auth/UserProfile'
+import Link from 'next/link'
+import { Button } from '@/components/ui/button'
+import { ArrowLeft } from 'lucide-react'
 
 export default function DashboardPage() {
   return (
     <ProtectedRoute>
       <div className="min-h-screen bg-gray-50">
         <div className="max-w-4xl mx-auto py-8 px-4">
+          <div className="mb-4">
+            <Button variant="ghost" size="sm" asChild>
+              <Link href="/">
+                <ArrowLeft className="w-4 h-4 mr-2" />
+                홈으로 돌아가기
+              </Link>
+            </Button>
+          </div>
           <div className="text-center mb-8">
             <h1 className="text-3xl font-bold text-gray-900 mb-4">
               대시보드

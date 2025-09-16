@@ -1,24 +1,45 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/components/ui/card'
 import { FileText, BarChart3, CheckCircle, Upload } from 'lucide-react'
 import { Header } from '@/components/layout/Header'
+import { useAuth } from '@/hooks/useAuth'
 
 export default function HomePage() {
-  const [showHeader, setShowHeader] = useState(false)
+  const { user, loading } = useAuth()
 
-  useEffect(() => {
-    // 컴포넌트가 마운트된 후 Header 표시
-    setShowHeader(true)
-  }, [])
+  const getStartButton = () => {
+    if (loading) {
+      return (
+        <Button size="lg" className="text-lg px-8" disabled>
+          로딩 중...
+        </Button>
+      )
+    }
+    
+    if (user) {
+      // 로그인된 사용자는 논술 입력 페이지로 이동
+      return (
+        <Button size="lg" className="text-lg px-8" asChild>
+          <Link href="/essay">무료로 시작하기</Link>
+        </Button>
+      )
+    } else {
+      // 로그인되지 않은 사용자는 로그인 페이지로 이동
+      return (
+        <Button size="lg" className="text-lg px-8" asChild>
+          <Link href="/auth">무료로 시작하기</Link>
+        </Button>
+      )
+    }
+  }
 
   return (
     <div className="min-h-screen bg-gray-50">
-      {/* Header - 마운트된 후에만 표시 */}
-      {showHeader && <Header />}
+      {/* Header - 항상 렌더링 */}
+      <Header />
 
       {/* Hero Section */}
       <section className="py-20 px-4">
@@ -31,11 +52,9 @@ export default function HomePage() {
             초등 교원 임용시험 준비를 더 효율적으로 시작하세요.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            <Button size="lg" className="text-lg px-8" asChild>
-              <Link href="/auth">무료로 시작하기</Link>
-            </Button>
+            {getStartButton()}
             <Button size="lg" variant="outline" className="text-lg px-8" asChild>
-              <Link href="/dashboard">데모 보기</Link>
+              <Link href="/demo">데모 보기</Link>
             </Button>
           </div>
         </div>
@@ -102,9 +121,7 @@ export default function HomePage() {
           <p className="text-xl text-gray-600 mb-8">
             무료 계정으로 AI 논술 분석을 체험해보고, 합격에 한 걸음 더 가까워지세요.
           </p>
-          <Button size="lg" className="text-lg px-8" asChild>
-            <Link href="/auth">무료로 시작하기</Link>
-          </Button>
+          {getStartButton()}
         </div>
       </section>
     </div>

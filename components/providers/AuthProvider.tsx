@@ -1,24 +1,10 @@
 'use client'
 
-import { useState, useEffect, createContext, useContext } from 'react'
+import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { AuthUser, AuthState } from '@/lib/types/auth'
 import { getCurrentUser } from '@/lib/auth'
-
-interface AuthContextType extends AuthState {
-  signOut: () => Promise<void>
-  refreshUser: () => Promise<void>
-}
-
-const AuthContext = createContext<AuthContextType | undefined>(undefined)
-
-export const useAuth = () => {
-  const context = useContext(AuthContext)
-  if (context === undefined) {
-    throw new Error('useAuth must be used within an AuthProvider')
-  }
-  return context
-}
+import { AuthContext, useAuth } from '@/hooks/useAuth'
 
 interface AuthProviderProps {
   children: React.ReactNode
@@ -88,7 +74,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   console.log('📊 AuthProvider - 현재 인증 상태:', state)
   
-  const contextValue: AuthContextType = {
+  const contextValue = {
     ...state,
     signOut,
     refreshUser

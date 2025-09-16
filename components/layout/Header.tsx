@@ -1,6 +1,5 @@
 'use client'
 
-import { useEffect, useState } from 'react'
 import Link from 'next/link'
 import { Button } from '@/components/ui/button'
 import { FileText, User, LogOut } from 'lucide-react'
@@ -9,16 +8,9 @@ import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
 
 export const Header = () => {
-  const [isMounted, setIsMounted] = useState(false)
-  
-  // 훅은 항상 호출 (React Hooks 규칙 준수)
   const { user, loading, signOut } = useAuth()
-  
-  useEffect(() => {
-    setIsMounted(true)
-  }, [])
 
-  console.log('🎯 Header 렌더링 - user:', user, 'loading:', loading, 'isMounted:', isMounted)
+  console.log('🎯 Header 렌더링 - user:', user, 'loading:', loading)
 
   const handleSignOut = async () => {
     try {
@@ -30,31 +22,6 @@ export const Header = () => {
 
   const getInitials = (email: string) => {
     return email.charAt(0).toUpperCase()
-  }
-
-  // 마운트되기 전까지는 로딩 상태 표시
-  if (!isMounted) {
-    return (
-      <header className="border-b border-gray-200 bg-white">
-        <div className="max-w-4xl mx-auto px-4 py-4 flex items-center justify-between">
-          <div className="flex items-center space-x-2">
-            <div className="w-8 h-8 bg-blue-600 rounded-lg flex items-center justify-center">
-              <FileText className="w-5 h-5 text-white" />
-            </div>
-            <Link href="/" className="hover:opacity-80 transition-opacity">
-              <span className="text-xl font-bold text-gray-900 cursor-pointer">교직논술 AI</span>
-            </Link>
-          </div>
-          
-          <nav className="flex items-center space-x-4">
-            <div className="flex items-center space-x-4">
-              <div className="w-8 h-8 bg-gray-200 rounded-full animate-pulse"></div>
-              <div className="w-20 h-8 bg-gray-200 rounded animate-pulse"></div>
-            </div>
-          </nav>
-        </div>
-      </header>
-    )
   }
 
   return (
