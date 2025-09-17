@@ -20,17 +20,31 @@ export async function POST(request: Request) {
       })
     }
 
-    // 실제 네이버 클로바 OCR 호출 (멀티파트 또는 JSON 스펙에 맞춰 조정 필요)
-    // 여기서는 가장 단순한 멀티파트 프록시를 사용합니다.
-    const proxyForm = new FormData()
-    proxyForm.append('file', file, file.name)
+    // 실제 네이버 클로바 OCR 호출 (권장: JSON + Base64)
+    // 스펙: Content-Type: application/json, 헤더 X-OCR-SECRET, 바디에 images[].data(Base64)
+    const arrayBuffer = await file.arrayBuffer()
+    const base64 = Buffer.from(arrayBuffer).toString('base64')
+    const extFromType = file.type.split('/')[1] || 'jpg'
+    const payload = {
+      version: 'V2',
+      requestId: (global as any).crypto?.randomUUID ? (global as any).crypto.randomUUID() : `${Date.now()}`,
+      timestamp: Date.now(),
+      images: [
+        {
+          format: extFromType.toUpperCase(),
+          name: file.name,
+          data: base64,
+        },
+      ],
+    }
 
     const ocrRes = await fetch(ocrUrl, {
       method: 'POST',
       headers: {
+        'Content-Type': 'application/json; charset=utf-8',
         'X-OCR-SECRET': ocrSecret,
       },
-      body: proxyForm as any,
+      body: JSON.stringify(payload),
     })
 
     const contentType = ocrRes.headers.get('content-type') || ''
@@ -49,25 +63,45 @@ export async function POST(request: Request) {
     let extractedText = ''
     if (isJson) {
       try {
-        // Clova OCR의 일반 구조 예시를 최대한 넓게 처리
-        // 사용자 환경에 따라 필드명이 다를 수 있어 안전하게 탐색
-        const candidates: string[] = []
-        const traverse = (obj: any) => {
-          if (!obj || typeof obj !== 'object') return
-          if (Array.isArray(obj)) {
-            obj.forEach(traverse)
-            return
-          }
-          for (const key of Object.keys(obj)) {
-            const value = (obj as any)[key]
-            if (key.toLowerCase().includes('text') && typeof value === 'string') {
-              candidates.push(value)
+        // Clova OCR 응답 구조 우선 처리 (fields/lines/words 등)
+        // 1) images[].fields[].inferText
+        const fields = ocrData?.images?.[0]?.fields
+        if (Array.isArray(fields)) {
+          extractedText = fields.map((f: any) => f?.inferText).filter(Boolean).join('\n')
+        }
+        // 2) fallback: lines[].words[].text
+        if (!extractedText) {
+          const lines = ocrData?.images?.[0]?.lines
+          if (Array.isArray(lines)) {
+            const texts: string[] = []
+            for (const line of lines) {
+              if (Array.isArray(line?.words)) {
+                texts.push(line.words.map((w: any) => w?.text).filter(Boolean).join(' '))
+              }
             }
-            traverse(value)
+            extractedText = texts.filter(Boolean).join('\n')
           }
         }
-        traverse(ocrData)
-        extractedText = candidates.join('\n')
+        // 3) 마지막 안전망: 전체 트리에서 text/InferText 키 수집
+        if (!extractedText) {
+          const candidates: string[] = []
+          const traverse = (obj: any) => {
+            if (!obj || typeof obj !== 'object') return
+            if (Array.isArray(obj)) {
+              obj.forEach(traverse)
+              return
+            }
+            for (const key of Object.keys(obj)) {
+              const value = (obj as any)[key]
+              if (/infertext|text/i.test(key) && typeof value === 'string') {
+                candidates.push(value)
+              }
+              traverse(value)
+            }
+          }
+          traverse(ocrData)
+          extractedText = candidates.join('\n')
+        }
       } catch {
         extractedText = ''
       }

@@ -29,6 +29,41 @@ export default function EssayPage() {
   const [ocrProgress, setOcrProgress] = useState(0)
   const [ocrStatus, setOcrStatus] = useState("")
 
+  // OCR 결과를 문단 단위로 자연스럽게 이어붙이기
+  const formatOcrText = (input: string) => {
+    if (!input) return ""
+    const lines = input.replace(/\r\n?/g, "\n").split("\n")
+    const paragraphs: string[] = []
+    let buffer = ""
+
+    const shouldAddSpace = (prev: string) => {
+      if (!prev) return false
+      return !/[\.,!?:;\)]$/.test(prev)
+    }
+
+    for (const raw of lines) {
+      const line = raw.trim()
+      if (!line) {
+        if (buffer.trim()) {
+          paragraphs.push(buffer.trim())
+          buffer = ""
+        }
+        continue
+      }
+
+      if (buffer.endsWith("-")) {
+        buffer = buffer.slice(0, -1) + line.replace(/^\s+/, "")
+      } else if (!buffer) {
+        buffer = line
+      } else {
+        buffer += (shouldAddSpace(buffer) ? " " : "") + line
+      }
+    }
+
+    if (buffer.trim()) paragraphs.push(buffer.trim())
+    return paragraphs.join("\n\n")
+  }
+
   const processOCR = async (file: File, type: "question" | "answer") => {
     setIsProcessingOCR(true)
     setOcrProgress(0)
@@ -59,9 +94,11 @@ export default function EssayPage() {
       setOcrStatus("완료!")
 
       if (type === "question") {
-        setQuestionText(result.text || "텍스트를 추출할 수 없습니다.")
+        const formatted = formatOcrText(result.text || "")
+        setQuestionText(formatted || "텍스트를 추출할 수 없습니다.")
       } else {
-        setAnswerText(result.text || "텍스트를 추출할 수 없습니다.")
+        const formatted = formatOcrText(result.text || "")
+        setAnswerText(formatted || "텍스트를 추출할 수 없습니다.")
       }
 
       // 1초 후 상태 초기화
