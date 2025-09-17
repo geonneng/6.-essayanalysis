@@ -13,6 +13,8 @@ export default function AnalysisResults() {
   const router = useRouter()
   const [analysisResult, setAnalysisResult] = useState<any>(null)
   const [isKakaoReady, setIsKakaoReady] = useState(false)
+  const [isEnriched, setIsEnriched] = useState(false)
+  const [loadError, setLoadError] = useState<string | null>(null)
 
   useEffect(() => {
     // 세션 스토리지에서 분석 결과 가져오기
@@ -23,24 +25,40 @@ export default function AnalysisResults() {
       try {
         const parsedResult = JSON.parse(storedResult)
         console.log('세션 스토리지에서 파싱된 분석 결과:', parsedResult)
-        setAnalysisResult(parsedResult)
+        // 로딩 직후 존댓말 정규화
+        const normalized = {
+          ...parsedResult,
+          strengths: Array.isArray(parsedResult.strengths) ? parsedResult.strengths.map((s: string) => toPolite(s)) : [],
+          weaknesses: Array.isArray(parsedResult.weaknesses) ? parsedResult.weaknesses.map((s: string) => toPolite(s)) : [],
+          improvements: Array.isArray(parsedResult.improvements) ? parsedResult.improvements.map((s: string) => toPolite(s)) : [],
+          detailedAnalysis: parsedResult.detailedAnalysis ? {
+            contentAnalysis: toPolite(parsedResult.detailedAnalysis.contentAnalysis || ''),
+            structureAnalysis: toPolite(parsedResult.detailedAnalysis.structureAnalysis || ''),
+            educationalPerspective: toPolite(parsedResult.detailedAnalysis.educationalPerspective || ''),
+            educationalTheory: toPolite(parsedResult.detailedAnalysis.educationalTheory || ''),
+          } : undefined,
+        }
+        setAnalysisResult(normalized)
+        setIsEnriched(false)
         // 세션 스토리지에서 제거하지 않음 (페이지 새로고침 시에도 유지)
       } catch (error) {
         console.error('분석 결과 파싱 오류:', error)
-        // 파싱 실패 시 기본값 사용
-        setDefaultResult()
+        setLoadError('분석 결과를 불러오지 못했습니다. 다시 시도해 주세요.')
+        alert('분석 결과를 불러오지 못했습니다. 다시 시도해 주세요.')
+        router.push('/essay')
       }
     } else {
       console.log('세션 스토리지에 데이터가 없음')
-      // 세션 스토리지에 데이터가 없으면 기본값 사용
-      setDefaultResult()
+      setLoadError('분석 데이터가 없습니다. 먼저 /essay에서 분석을 진행해 주세요.')
+      alert('분석 데이터가 없습니다. 먼저 /essay에서 분석을 진행해 주세요.')
+      router.push('/essay')
     }
   }, [])
 
   // 분석 결과를 기반으로 다채로운 해설을 서버에서 생성
   useEffect(() => {
     const enrich = async () => {
-      if (!analysisResult) return
+      if (!analysisResult || isEnriched) return
       try {
         const res = await fetch('/api/enrich', {
           method: 'POST',
@@ -59,25 +77,46 @@ export default function AnalysisResults() {
             }
           })
         })
-        if (!res.ok) return
-        const data = await res.json()
-        // 존댓말 보정 및 주입
-        const toArr = (arr: any) => Array.isArray(arr) ? arr : []
-        analysisResult.strengthsDetails = toArr(data.strengthsDetails)
-        analysisResult.weaknessesDetails = toArr(data.weaknessesDetails)
-        analysisResult.improvementsDetails = toArr(data.improvementsDetails)
-        analysisResult.detailedAnalysis = {
-          ...analysisResult.detailedAnalysis,
-          contentAnalysis: toPolite(data?.detailed?.contentAnalysis || analysisResult.detailedAnalysis?.contentAnalysis || ''),
-          structureAnalysis: toPolite(data?.detailed?.structureAnalysis || analysisResult.detailedAnalysis?.structureAnalysis || ''),
-          educationalPerspective: toPolite(data?.detailed?.educationalPerspective || analysisResult.detailedAnalysis?.educationalPerspective || ''),
-          educationalTheory: toPolite(data?.detailed?.educationalTheory || analysisResult.detailedAnalysis?.educationalTheory || ''),
+        if (!res.ok) {
+          alert('AI 확장 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.')
+          return
         }
-        setAnalysisResult({ ...analysisResult })
-      } catch {}
+        const data = await res.json()
+        const toArr = (arr: any) => Array.isArray(arr) ? arr : []
+        const sDetails: string[][] = toArr(data.strengthsDetails)
+        const wDetails: string[][] = toArr(data.weaknessesDetails)
+        const iDetails: string[][] = toArr(data.improvementsDetails)
+
+        // 작은 보조 문구를 없애고, 본문에 예시를 자연스럽게 병합(2개 정도 선택)
+        const mergeExamples = (base: string, extras: string[] = []) => {
+          const pick = extras.slice(0, 2).map((x) => toPolite(x))
+          const merged = [toPolite(base), ...pick].join('\n\n')
+          return merged
+        }
+        const mergedStrengths = (analysisResult.strengths || []).map((s: string, idx: number) => mergeExamples(s, sDetails[idx]))
+        const mergedWeaknesses = (analysisResult.weaknesses || []).map((s: string, idx: number) => mergeExamples(s, wDetails[idx]))
+        const mergedImprovements = (analysisResult.improvements || []).map((s: string, idx: number) => mergeExamples(s, iDetails[idx]))
+
+        setAnalysisResult({
+          ...analysisResult,
+          strengths: mergedStrengths,
+          weaknesses: mergedWeaknesses,
+          improvements: mergedImprovements,
+          detailedAnalysis: {
+            ...analysisResult.detailedAnalysis,
+            contentAnalysis: toPolite(data?.detailed?.contentAnalysis || analysisResult.detailedAnalysis?.contentAnalysis || ''),
+            structureAnalysis: toPolite(data?.detailed?.structureAnalysis || analysisResult.detailedAnalysis?.structureAnalysis || ''),
+            educationalPerspective: toPolite(data?.detailed?.educationalPerspective || analysisResult.detailedAnalysis?.educationalPerspective || ''),
+            educationalTheory: toPolite(data?.detailed?.educationalTheory || analysisResult.detailedAnalysis?.educationalTheory || ''),
+          }
+        })
+        setIsEnriched(true)
+      } catch {
+        alert('AI 확장 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.')
+      }
     }
     enrich()
-  }, [analysisResult])
+  }, [analysisResult, isEnriched])
 
   // 공유 설정 섹션은 제거되었습니다
 
@@ -237,35 +276,7 @@ export default function AnalysisResults() {
     ]
   }
 
-  const setDefaultResult = () => {
-    // 세션 스토리지에 데이터가 없을 때만 기본값 사용
-    setAnalysisResult({
-      score: 0,
-      maxScore: 20,
-      strengths: ["분석 데이터가 없습니다."],
-      weaknesses: ["분석 데이터가 없습니다."],
-      improvements: ["분석 데이터가 없습니다."],
-      detailedAnalysis: {
-        contentAnalysis: "분석할 논술 내용이 없습니다. /essay 페이지에서 먼저 분석을 진행해주세요.",
-        structureAnalysis: "분석할 논술 체계가 없습니다. /essay 페이지에서 먼저 분석을 진행해주세요.",
-        educationalPerspective: "교육적 관점 분석 데이터가 없습니다. /essay 페이지에서 먼저 분석을 진행해주세요.",
-        educationalTheory: "교육학 이론 관점 분석 데이터가 없습니다. /essay 페이지에서 먼저 분석을 진행해주세요.",
-      },
-      categories: {
-        logicalStructure: 0,
-        spelling: 0,
-        vocabulary: 0,
-      },
-      analysisDate: new Date().toLocaleDateString('ko-KR', {
-        year: 'numeric',
-        month: 'long',
-        day: 'numeric'
-      }),
-      questionTitle: "분석 데이터 없음",
-      questionText: "분석할 문제가 없습니다. /essay 페이지에서 먼저 분석을 진행해주세요.",
-      answerText: "분석할 답안이 없습니다. /essay 페이지에서 먼저 분석을 진행해주세요.",
-    })
-  }
+  // 더 이상 기본(Mock) 데이터는 사용하지 않습니다
 
   const handleNewAnalysis = () => {
     // 새로운 분석을 시작할 때 세션 스토리지 정리
@@ -276,7 +287,12 @@ export default function AnalysisResults() {
   if (!analysisResult) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
-        <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary"></div>
+        <div className="text-center space-y-3">
+          <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto"></div>
+          {loadError && (
+            <p className="text-sm text-muted-foreground">{loadError}</p>
+          )}
+        </div>
       </div>
     )
   }
@@ -417,26 +433,19 @@ export default function AnalysisResults() {
               </CardHeader>
               <CardContent>
                 <ul className="space-y-4">
-                  {analysisResult.strengths.map((strength: string, index: number) => {
-                    const polite = toPolite(strength)
-                    const details = (analysisResult.strengthsDetails?.[index] as string[] | undefined) || generateStrengthDetails(polite)
-                    return (
-                      <li
-                        key={index}
-                        className="flex items-start space-x-3 p-4 bg-green-50 dark:bg-green-950/20 rounded-lg border border-green-200 dark:border-green-800"
-                      >
-                        <div className="w-7 h-7 bg-green-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-white text-sm font-bold">{index + 1}</span>
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-foreground leading-relaxed text-sm mb-1">{polite}</p>
-                          {details.map((d, i) => (
-                            <p key={i} className="text-xs text-green-700 dark:text-green-300">{d}</p>
-                          ))}
-                        </div>
-                      </li>
-                    )
-                  })}
+                  {analysisResult.strengths.map((strength: string, index: number) => (
+                    <li
+                      key={index}
+                      className="flex items-start space-x-3 p-4 bg-green-50 dark:bg-green-950/20 rounded-lg border border-green-200 dark:border-green-800"
+                    >
+                      <div className="w-7 h-7 bg-green-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span className="text-white text-sm font-bold">{index + 1}</span>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-foreground leading-relaxed text-sm whitespace-pre-wrap">{strength}</p>
+                      </div>
+                    </li>
+                  ))}
                 </ul>
               </CardContent>
             </Card>
@@ -452,26 +461,19 @@ export default function AnalysisResults() {
               </CardHeader>
               <CardContent>
                 <ul className="space-y-4">
-                  {analysisResult.weaknesses.map((weakness: string, index: number) => {
-                    const polite = toPolite(weakness)
-                    const details = (analysisResult.weaknessesDetails?.[index] as string[] | undefined) || generateWeaknessDetails(polite)
-                    return (
-                      <li
-                        key={index}
-                        className="flex items-start space-x-3 p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800"
-                      >
-                        <div className="w-7 h-7 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-white text-sm font-bold">{index + 1}</span>
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-foreground leading-relaxed text-sm mb-1">{polite}</p>
-                          {details.map((d, i) => (
-                            <p key={i} className="text-xs text-orange-700 dark:text-orange-300">{d}</p>
-                          ))}
-                        </div>
-                      </li>
-                    )
-                  })}
+                  {analysisResult.weaknesses.map((weakness: string, index: number) => (
+                    <li
+                      key={index}
+                      className="flex items-start space-x-3 p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800"
+                    >
+                      <div className="w-7 h-7 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span className="text-white text-sm font-bold">{index + 1}</span>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-foreground leading-relaxed text-sm whitespace-pre-wrap">{weakness}</p>
+                      </div>
+                    </li>
+                  ))}
                 </ul>
               </CardContent>
             </Card>
@@ -487,26 +489,19 @@ export default function AnalysisResults() {
               </CardHeader>
               <CardContent>
                 <ul className="space-y-4">
-                  {analysisResult.improvements.map((improvement: string, index: number) => {
-                    const polite = toPolite(improvement)
-                    const details = (analysisResult.improvementsDetails?.[index] as string[] | undefined) || generateImprovementDetails(polite)
-                    return (
-                      <li
-                        key={index}
-                        className="flex items-start space-x-3 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800"
-                      >
-                        <div className="w-7 h-7 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-white text-sm font-bold">{index + 1}</span>
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-foreground leading-relaxed text-sm mb-1">{polite}</p>
-                          {details.map((d, i) => (
-                            <p key={i} className="text-xs text-blue-700 dark:text-blue-300">{d}</p>
-                          ))}
-                        </div>
-                      </li>
-                    )
-                  })}
+                  {analysisResult.improvements.map((improvement: string, index: number) => (
+                    <li
+                      key={index}
+                      className="flex items-start space-x-3 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800"
+                    >
+                      <div className="w-7 h-7 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                        <span className="text-white text-sm font-bold">{index + 1}</span>
+                      </div>
+                      <div className="flex-1">
+                        <p className="text-foreground leading-relaxed text-sm whitespace-pre-wrap">{improvement}</p>
+                      </div>
+                    </li>
+                  ))}
                 </ul>
               </CardContent>
             </Card>
