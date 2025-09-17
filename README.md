@@ -9,6 +9,8 @@ AI 기반 초등 교직논술 분석 및 피드백 서비스입니다.
 - 🛡️ **보안**: Supabase를 통한 안전한 인증 시스템
 - 📱 **반응형 UI**: 모바일과 데스크톱에서 최적화된 사용자 경험
 - 🎨 **현대적 디자인**: shadcn/ui 컴포넌트를 활용한 아름다운 인터페이스
+- 📄 **OCR 텍스트 추출**: 네이버 클로바 OCR을 통한 이미지에서 텍스트 자동 추출
+- 🤖 **AI 논술 분석**: Google Gemini API를 활용한 상세한 논술 분석 및 피드백
 
 ## 기술 스택
 
@@ -18,6 +20,9 @@ AI 기반 초등 교직논술 분석 및 피드백 서비스입니다.
 - **폼 관리**: React Hook Form, Zod
 - **상태 관리**: React Context API
 - **아이콘**: Lucide React
+- **OCR**: 네이버 클로바 OCR API
+- **AI 분석**: Google Gemini API
+- **HTTP 클라이언트**: Axios
 
 ## 설치 및 설정
 
@@ -35,6 +40,13 @@ npm install
 # Supabase 설정
 NEXT_PUBLIC_SUPABASE_URL=your_supabase_project_url
 NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
+
+# Google Gemini API 설정
+GOOGLE_GEMINI_API_KEY=your_gemini_api_key_here
+
+# 네이버 클로바 OCR API 설정
+NAVER_CLOVA_OCR_API_URL=your_api_gateway_endpoint_url_here
+NAVER_CLOVA_OCR_SECRET_KEY=your_clova_ocr_secret_key_here
 ```
 
 ### 3. Supabase 프로젝트 설정
@@ -47,7 +59,29 @@ NEXT_PUBLIC_SUPABASE_ANON_KEY=your_supabase_anon_key
    - Google Client ID와 Secret을 설정
    - Authorized redirect URI: `https://your-project.supabase.co/auth/v1/callback`
 
-### 4. 개발 서버 실행
+### 4. Google Gemini API 설정
+
+1. [Google AI Studio](https://makersuite.google.com/app/apikey)에서 API 키를 생성합니다.
+2. 생성된 API 키를 `.env.local` 파일의 `GOOGLE_GEMINI_API_KEY`에 설정합니다.
+
+### 5. 네이버 클로바 OCR API 설정
+
+1. [네이버 클라우드 플랫폼](https://www.ncloud.com)에 가입합니다.
+2. AI Services > Clova OCR 서비스를 신청합니다.
+3. **도메인의 OCR InvokeURL 확인**:
+   - Clova OCR 서비스에서 OCR InvokeURL을 확인합니다.
+   - 예: `https://your-domain.apigw.ntruss.com/custom/v1/vision/ocr/general`
+4. **API Gateway의 Endpoint로 연결**:
+   - API Gateway에서 OCR API를 생성합니다.
+   - Endpoint URL을 복사합니다.
+5. **외부 연동을 위한 Secret 키 발급**:
+   - API Gateway에서 Secret 키를 발급받습니다.
+   - **참고**: 네이버 클로바 OCR은 API 키가 필요하지 않습니다.
+6. 발급받은 정보들을 `.env.local` 파일에 설정합니다:
+   - `NAVER_CLOVA_OCR_API_URL`: API Gateway Endpoint URL
+   - `NAVER_CLOVA_OCR_SECRET_KEY`: Secret 키
+
+### 6. 개발 서버 실행
 
 ```bash
 npm run dev
@@ -138,6 +172,9 @@ const { user, loading, error, signOut } = useAuth()
 |--------|------|------|
 | `NEXT_PUBLIC_SUPABASE_URL` | Supabase 프로젝트 URL | ✅ |
 | `NEXT_PUBLIC_SUPABASE_ANON_KEY` | Supabase 익명 키 | ✅ |
+| `GOOGLE_GEMINI_API_KEY` | Google Gemini API 키 | ✅ |
+| `NAVER_CLOVA_OCR_API_URL` | 네이버 클로바 OCR API Gateway URL | ✅ |
+| `NAVER_CLOVA_OCR_SECRET_KEY` | 네이버 클로바 OCR Secret 키 | ✅ |
 
 ## 배포
 

@@ -25,21 +25,82 @@ export default function EssayPage() {
   const [analysisResult, setAnalysisResult] = useState<any>(null)
   const [analysisHistory, setAnalysisHistory] = useState<any[]>([])
   const [retryableError, setRetryableError] = useState<string | null>(null)
+  const [isProcessingOCR, setIsProcessingOCR] = useState(false)
+  const [ocrProgress, setOcrProgress] = useState(0)
+  const [ocrStatus, setOcrStatus] = useState("")
+
+  const processOCR = async (file: File, type: "question" | "answer") => {
+    setIsProcessingOCR(true)
+    setOcrProgress(0)
+    setOcrStatus("이미지 업로드 중...")
+
+    try {
+      const formData = new FormData()
+      formData.append('file', file)
+
+      setOcrProgress(30)
+      setOcrStatus("OCR 처리 중...")
+
+      const response = await fetch('/api/ocr', {
+        method: 'POST',
+        body: formData,
+      })
+
+      setOcrProgress(70)
+      setOcrStatus("텍스트 추출 중...")
+
+      const result = await response.json()
+
+      if (!response.ok) {
+        throw new Error(result.error || 'OCR 처리 중 오류가 발생했습니다.')
+      }
+
+      setOcrProgress(100)
+      setOcrStatus("완료!")
+
+      if (type === "question") {
+        setQuestionText(result.text || "텍스트를 추출할 수 없습니다.")
+      } else {
+        setAnswerText(result.text || "텍스트를 추출할 수 없습니다.")
+      }
+
+      // 1초 후 상태 초기화
+      setTimeout(() => {
+        setIsProcessingOCR(false)
+        setOcrProgress(0)
+        setOcrStatus("")
+      }, 1000)
+
+    } catch (error) {
+      console.error('OCR 처리 오류:', error)
+      setIsProcessingOCR(false)
+      setOcrProgress(0)
+      setOcrStatus("")
+      
+      // 오류 발생 시 Mock 데이터 사용
+      if (type === "question") {
+        setQuestionText(
+          "다음 상황에서 교사로서 어떻게 대응할 것인지 서술하시오.\n\n학급에서 일부 학생들이 다른 학생을 따돌리는 상황이 발생했습니다. 피해 학생은 위축되어 있고, 가해 학생들은 자신들의 행동이 잘못되었다는 것을 인식하지 못하고 있습니다.",
+        )
+      } else {
+        setAnswerText(
+          "이러한 상황에서 교사로서 다음과 같이 대응하겠습니다.\n\n첫째, 즉시 상황을 파악하고 피해 학생을 보호하겠습니다. 피해 학생과 개별 상담을 통해 심리적 안정을 도모하고, 필요시 상담교사나 학부모와 연계하여 지원체계를 구축하겠습니다.\n\n둘째, 가해 학생들과 개별 및 집단 상담을 실시하여 자신들의 행동이 타인에게 미치는 영향을 깨닫게 하고, 공감 능력을 기르도록 지도하겠습니다.\n\n셋째, 학급 전체를 대상으로 인권 교육과 배려 문화 조성을 위한 활동을 전개하여 재발 방지에 힘쓰겠습니다.",
+        )
+      }
+      
+      alert(`OCR 처리 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}\n\nMock 데이터로 대체됩니다.`)
+    }
+  }
 
   const handleFileUpload = (file: File, type: "question" | "answer") => {
     if (type === "question") {
       setQuestionFile(file)
-      // Mock OCR result
-      setQuestionText(
-        "다음 상황에서 교사로서 어떻게 대응할 것인지 서술하시오.\n\n학급에서 일부 학생들이 다른 학생을 따돌리는 상황이 발생했습니다. 피해 학생은 위축되어 있고, 가해 학생들은 자신들의 행동이 잘못되었다는 것을 인식하지 못하고 있습니다.",
-      )
     } else {
       setAnswerFile(file)
-      // Mock OCR result
-      setAnswerText(
-        "이러한 상황에서 교사로서 다음과 같이 대응하겠습니다.\n\n첫째, 즉시 상황을 파악하고 피해 학생을 보호하겠습니다. 피해 학생과 개별 상담을 통해 심리적 안정을 도모하고, 필요시 상담교사나 학부모와 연계하여 지원체계를 구축하겠습니다.\n\n둘째, 가해 학생들과 개별 및 집단 상담을 실시하여 자신들의 행동이 타인에게 미치는 영향을 깨닫게 하고, 공감 능력을 기르도록 지도하겠습니다.\n\n셋째, 학급 전체를 대상으로 인권 교육과 배려 문화 조성을 위한 활동을 전개하여 재발 방지에 힘쓰겠습니다.",
-      )
     }
+    
+    // OCR 처리 시작
+    processOCR(file, type)
   }
 
   const handleAnalysis = async () => {
@@ -225,6 +286,19 @@ export default function EssayPage() {
                   <CardDescription>문제지와 작성 답안을 업로드하세요 (JPG, PNG, PDF 지원)</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {/* OCR 진행 상태 표시 */}
+                  {isProcessingOCR && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-blue-800">{ocrStatus}</p>
+                          <Progress value={ocrProgress} className="mt-2" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+                  
                   <div>
                     <label className="text-sm font-medium text-foreground mb-2 block">문제지</label>
                     <div
