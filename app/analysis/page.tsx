@@ -1,6 +1,6 @@
 'use client'
 
-import { useState, useEffect } from "react"
+import { useState, useEffect, useRef } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -15,12 +15,24 @@ export default function AnalysisResults() {
   const [isKakaoReady, setIsKakaoReady] = useState(false)
   const [isEnriched, setIsEnriched] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const enrichLockRef = useRef(false)
 
   useEffect(() => {
     // 세션 스토리지에서 분석 결과 가져오기
+    const storedEnriched = sessionStorage.getItem('latestAnalysisResult_enriched')
     const storedResult = sessionStorage.getItem('latestAnalysisResult')
     console.log('세션 스토리지에서 읽어온 데이터:', storedResult)
     
+    if (storedEnriched) {
+      try {
+        const parsed = JSON.parse(storedEnriched)
+        setAnalysisResult(parsed)
+        setIsEnriched(true)
+        return
+      } catch {
+        // ignore and fall back to raw
+      }
+    }
     if (storedResult) {
       try {
         const parsedResult = JSON.parse(storedResult)
@@ -59,6 +71,8 @@ export default function AnalysisResults() {
   useEffect(() => {
     const enrich = async () => {
       if (!analysisResult || isEnriched) return
+      if (enrichLockRef.current) return
+      enrichLockRef.current = true
       try {
         const res = await fetch('/api/enrich', {
           method: 'POST',
@@ -93,11 +107,13 @@ export default function AnalysisResults() {
           const merged = [toPolite(base), ...pick].join('\n\n')
           return merged
         }
-        const mergedStrengths = (analysisResult.strengths || []).map((s: string, idx: number) => mergeExamples(s, sDetails[idx]))
+        const mergedStrengths = (analysisResult.strengths || [])
+          .map((s: string, idx: number) => mergeExamples(s, sDetails[idx]))
+          .map((t: string) => sanitizeExampleLabels(t))
         const mergedWeaknesses = (analysisResult.weaknesses || []).map((s: string, idx: number) => mergeExamples(s, wDetails[idx]))
         const mergedImprovements = (analysisResult.improvements || []).map((s: string, idx: number) => mergeExamples(s, iDetails[idx]))
 
-        setAnalysisResult({
+        const enrichedPayload = {
           ...analysisResult,
           strengths: mergedStrengths,
           weaknesses: mergedWeaknesses,
@@ -109,10 +125,16 @@ export default function AnalysisResults() {
             educationalPerspective: toPolite(data?.detailed?.educationalPerspective || analysisResult.detailedAnalysis?.educationalPerspective || ''),
             educationalTheory: toPolite(data?.detailed?.educationalTheory || analysisResult.detailedAnalysis?.educationalTheory || ''),
           }
-        })
+        }
+        setAnalysisResult(enrichedPayload)
+        try {
+          sessionStorage.setItem('latestAnalysisResult_enriched', JSON.stringify(enrichedPayload))
+        } catch {}
         setIsEnriched(true)
       } catch {
         alert('AI 확장 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.')
+      } finally {
+        enrichLockRef.current = false
       }
     }
     enrich()
@@ -274,6 +296,83 @@ export default function AnalysisResults() {
       `[통계 중심] 목표치(예: 4주 내 결근/지각 30% 감소, 상담 참여율 80% 달성)를 사전에 설정해 추적하시기 바랍니다.`,
       `[이론 인용] 구성주의 관점에서 협동학습 구조(Jigsaw 등)를 간단히 언급하며 활동 설계의 이론적 근거를 제시해 주십시오.`,
     ]
+  }
+
+  // 개선/보완 항목의 맥락 연결을 위해 원문(문제/답안)에서 관련 구절을 찾는 보조 함수
+  const getRelatedContext = (itemText: string, question: string, answer: string): { label: '문제' | '답안', snippet: string } | null => {
+    try {
+      const tokenize = (s: string) => (s.match(/[가-힣A-Za-z0-9]{2,}/g) || []).map(w => w.toLowerCase())
+      const stop = new Set(['그리고','그러나','하지만','또한','및','있는','위한','한다','하였다','입니다','정도','관련','부분','개선','필요','가능','제시','예시','학생','교사','학교','학급'])
+      const terms = tokenize(itemText).filter(t => !stop.has(t)).slice(0, 6)
+      const splitSentences = (text: string) =>
+        text
+          .replace(/\r\n?/g, '\n')
+          .split(/(?<=[\.\!\?]|\n|다\.|니다\.|요\.)\s+/)
+          .map(s => s.trim())
+          .filter(Boolean)
+      const qSents = splitSentences(question)
+      const aSents = splitSentences(answer)
+      const score = (sent: string) => {
+        const lower = sent.toLowerCase()
+        return terms.reduce((acc, t) => acc + (lower.includes(t) ? 1 : 0), 0)
+      }
+      let best: {label: '문제'|'답안', snippet: string, sc: number} | null = null
+      for (const s of qSents) {
+        const sc = score(s)
+        if (sc > 0 && (!best || sc > best.sc)) best = { label: '문제', snippet: s, sc }
+      }
+      for (const s of aSents) {
+        const sc = score(s)
+        if (sc > 0 && (!best || sc > best.sc)) best = { label: '답안', snippet: s, sc }
+      }
+      if (!best) return null
+      return { label: best.label, snippet: best.snippet }
+    } catch {
+      return null
+    }
+  }
+
+  // 답안에서만 관련 근거를 찾는 보조 함수
+  const getRelatedFromAnswer = (itemText: string, answer: string): { label: '답안', snippet: string } | null => {
+    try {
+      const tokenize = (s: string) => (s.match(/[가-힣A-Za-z0-9]{2,}/g) || []).map(w => w.toLowerCase())
+      const stop = new Set(['그리고','그러나','하지만','또한','및','있는','위한','한다','하였다','입니다','정도','관련','부분','개선','필요','가능','제시','예시','학생','교사','학교','학급'])
+      const terms = tokenize(itemText).filter(t => !stop.has(t)).slice(0, 6)
+      const splitSentences = (text: string) =>
+        text
+          .replace(/\r\n?/g, '\n')
+          .split(/(?<=[\.\!\?]|\n|다\.|니다\.|요\.)\s+/)
+          .map(s => s.trim())
+          .filter(Boolean)
+      const aSents = splitSentences(answer)
+      const score = (sent: string) => {
+        const lower = sent.toLowerCase()
+        return terms.reduce((acc, t) => acc + (lower.includes(t) ? 1 : 0), 0)
+      }
+      let best: { snippet: string, sc: number } | null = null
+      for (const s of aSents) {
+        const sc = score(s)
+        if (sc > 0 && (!best || sc > best.sc)) best = { snippet: s, sc }
+      }
+      if (!best) return null
+      return { label: '답안', snippet: best.snippet }
+    } catch {
+      return null
+    }
+  }
+
+  // 강점 섹션에서 (사례 중심)/(통계 중심) 레이블만 제거(본문은 보존)
+  const sanitizeExampleLabels = (text: string) => {
+    try {
+      return text
+        .replace(/\s*[\(\[\{]?\s*(사례\s*중심|통계\s*중심)\s*[\)\]\}]?\.?/gi, '')
+        .replace(/\s{2,}/g, ' ')
+        .replace(/\s+\./g, '.')
+        .replace(/\n{3,}/g, '\n\n')
+        .trim()
+    } catch {
+      return text
+    }
   }
 
   // 더 이상 기본(Mock) 데이터는 사용하지 않습니다
@@ -461,19 +560,27 @@ export default function AnalysisResults() {
               </CardHeader>
               <CardContent>
                 <ul className="space-y-4">
-                  {analysisResult.weaknesses.map((weakness: string, index: number) => (
-                    <li
-                      key={index}
-                      className="flex items-start space-x-3 p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800"
-                    >
-                      <div className="w-7 h-7 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-white text-sm font-bold">{index + 1}</span>
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-foreground leading-relaxed text-sm whitespace-pre-wrap">{weakness}</p>
-                      </div>
-                    </li>
-                  ))}
+                  {analysisResult.weaknesses.map((weakness: string, index: number) => {
+                    const ctx = getRelatedFromAnswer(weakness, analysisResult.answerText || '')
+                    return (
+                      <li
+                        key={index}
+                        className="flex items-start space-x-3 p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800"
+                      >
+                        <div className="w-7 h-7 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <span className="text-white text-sm font-bold">{index + 1}</span>
+                        </div>
+                        <div className="flex-1 space-y-2">
+                          <p className="text-foreground leading-relaxed text-sm whitespace-pre-wrap">{weakness}</p>
+                          {ctx && (
+                            <p className="text-xs text-orange-700 dark:text-orange-300">
+                              관련 근거({ctx.label}): {ctx.snippet}
+                            </p>
+                          )}
+                        </div>
+                      </li>
+                    )
+                  })}
                 </ul>
               </CardContent>
             </Card>
@@ -489,19 +596,27 @@ export default function AnalysisResults() {
               </CardHeader>
               <CardContent>
                 <ul className="space-y-4">
-                  {analysisResult.improvements.map((improvement: string, index: number) => (
-                    <li
-                      key={index}
-                      className="flex items-start space-x-3 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800"
-                    >
-                      <div className="w-7 h-7 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-white text-sm font-bold">{index + 1}</span>
-                      </div>
-                      <div className="flex-1">
-                        <p className="text-foreground leading-relaxed text-sm whitespace-pre-wrap">{improvement}</p>
-                      </div>
-                    </li>
-                  ))}
+                  {analysisResult.improvements.map((improvement: string, index: number) => {
+                    const ctx = getRelatedFromAnswer(improvement, analysisResult.answerText || '')
+                    return (
+                      <li
+                        key={index}
+                        className="flex items-start space-x-3 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800"
+                      >
+                        <div className="w-7 h-7 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <span className="text-white text-sm font-bold">{index + 1}</span>
+                        </div>
+                        <div className="flex-1 space-y-2">
+                          <p className="text-foreground leading-relaxed text-sm whitespace-pre-wrap">{improvement}</p>
+                          {ctx && (
+                            <p className="text-xs text-blue-700 dark:text-blue-300">
+                              관련 근거({ctx.label}): {ctx.snippet}
+                            </p>
+                          )}
+                        </div>
+                      </li>
+                    )
+                  })}
                 </ul>
               </CardContent>
             </Card>
