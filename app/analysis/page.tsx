@@ -3,7 +3,6 @@
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
-import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -14,9 +13,6 @@ export default function AnalysisResults() {
   const router = useRouter()
   const [analysisResult, setAnalysisResult] = useState<any>(null)
   const [isKakaoReady, setIsKakaoReady] = useState(false)
-  const [shareTitle, setShareTitle] = useState("")
-  const [shareSummary, setShareSummary] = useState("")
-  const [shareImageUrl, setShareImageUrl] = useState("")
 
   useEffect(() => {
     // 세션 스토리지에서 분석 결과 가져오기
@@ -41,19 +37,49 @@ export default function AnalysisResults() {
     }
   }, [])
 
-  // 결과 로딩 후 기본 공유값 세팅
+  // 분석 결과를 기반으로 다채로운 해설을 서버에서 생성
   useEffect(() => {
-    if (!analysisResult) return
-    try {
-      const urlBase = typeof window !== 'undefined' ? window.location.origin : ''
-      const defaultTitle = analysisResult?.questionTitle || '교직논술 분석 결과'
-      const defaultSummary = buildShareText(true)
-      const defaultImage = `${urlBase}/placeholder.jpg`
-      if (!shareTitle) setShareTitle(defaultTitle)
-      if (!shareSummary) setShareSummary(defaultSummary)
-      if (!shareImageUrl) setShareImageUrl(defaultImage)
-    } catch {}
+    const enrich = async () => {
+      if (!analysisResult) return
+      try {
+        const res = await fetch('/api/enrich', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            strengths: analysisResult.strengths || [],
+            weaknesses: analysisResult.weaknesses || [],
+            improvements: analysisResult.improvements || [],
+            detailedAnalysis: analysisResult.detailedAnalysis || {},
+            questionTitle: analysisResult.questionTitle || '',
+            preferences: {
+              theories: ['비고츠키 ZPD', '반두라 사회학습', '피아제 인지발달', '브루너 발견학습', '콜버그 도덕성'],
+              statsSources: ['교육부 실태조사', '학업성취도 평가', '학급 자체 설문'],
+              domains: ['학급경영', '학교폭력 예방', '학부모 소통', '협동학습'],
+              tone: '전문적이고 친절한 교원 평가 톤'
+            }
+          })
+        })
+        if (!res.ok) return
+        const data = await res.json()
+        // 존댓말 보정 및 주입
+        const toArr = (arr: any) => Array.isArray(arr) ? arr : []
+        analysisResult.strengthsDetails = toArr(data.strengthsDetails)
+        analysisResult.weaknessesDetails = toArr(data.weaknessesDetails)
+        analysisResult.improvementsDetails = toArr(data.improvementsDetails)
+        analysisResult.detailedAnalysis = {
+          ...analysisResult.detailedAnalysis,
+          contentAnalysis: toPolite(data?.detailed?.contentAnalysis || analysisResult.detailedAnalysis?.contentAnalysis || ''),
+          structureAnalysis: toPolite(data?.detailed?.structureAnalysis || analysisResult.detailedAnalysis?.structureAnalysis || ''),
+          educationalPerspective: toPolite(data?.detailed?.educationalPerspective || analysisResult.detailedAnalysis?.educationalPerspective || ''),
+          educationalTheory: toPolite(data?.detailed?.educationalTheory || analysisResult.detailedAnalysis?.educationalTheory || ''),
+        }
+        setAnalysisResult({ ...analysisResult })
+      } catch {}
+    }
+    enrich()
   }, [analysisResult])
+
+  // 공유 설정 섹션은 제거되었습니다
 
   // Kakao SDK 로드 및 초기화 (있을 때만)
   useEffect(() => {
@@ -82,12 +108,12 @@ export default function AnalysisResults() {
   }, [])
 
   const buildShareText = (forInit?: boolean) => {
-    const title = forInit ? (analysisResult?.questionTitle || '교직논술 분석 결과') : (shareTitle || '교직논술 분석 결과')
+    const title = (analysisResult?.questionTitle || '교직논술 분석 결과')
     const score = `${analysisResult?.score ?? 0}/${analysisResult?.maxScore ?? 20}`
     const strengths = (analysisResult?.strengths || []).slice(0, 2).join(' · ')
     const weaknesses = (analysisResult?.weaknesses || []).slice(0, 2).join(' · ')
     const base = `${title}\n점수: ${score}\n강점: ${strengths || '—'}\n보완점: ${weaknesses || '—'}`
-    return forInit ? base : (shareSummary || base)
+    return base
   }
 
   const handleShare = async () => {
@@ -113,7 +139,7 @@ export default function AnalysisResults() {
           content: {
             title: '교직논술 분석 결과',
             description: buildShareText(),
-            imageUrl: shareImageUrl || 'https://developers.kakao.com/assets/img/about/logos/kakaolink/kakaolink_btn_medium.png',
+            imageUrl: 'https://developers.kakao.com/assets/img/about/logos/kakaolink/kakaolink_btn_medium.png',
             link: {
               mobileWebUrl: window.location.href,
               webUrl: window.location.href,
@@ -287,37 +313,7 @@ export default function AnalysisResults() {
 
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <div className="space-y-6">
-          {/* 공유 설정 */}
-          <Card>
-            <CardHeader>
-              <CardTitle>공유 설정</CardTitle>
-              <CardDescription>카카오톡 등으로 공유할 제목, 요약, 썸네일 이미지를 설정하실 수 있습니다.</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <div>
-                <label className="text-sm font-medium block mb-1">제목</label>
-                <Input value={shareTitle} onChange={(e) => setShareTitle(e.target.value)} placeholder="공유 제목" />
-              </div>
-              <div>
-                <label className="text-sm font-medium block mb-1">요약</label>
-                <textarea
-                  value={shareSummary}
-                  onChange={(e) => setShareSummary(e.target.value)}
-                  placeholder="공유 본문 요약"
-                  className="w-full border rounded-md p-2 text-sm h-24"
-                />
-              </div>
-              <div>
-                <label className="text-sm font-medium block mb-1">썸네일 이미지 URL</label>
-                <Input value={shareImageUrl} onChange={(e) => setShareImageUrl(e.target.value)} placeholder="https://..." />
-              </div>
-              <div className="flex justify-end">
-                <Button variant="outline" onClick={handleShare}>
-                  <Share2 className="w-4 h-4 mr-2" /> 미리보기 공유
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
+          
           {/* Question Title */}
           <Card>
             <CardHeader>
@@ -423,7 +419,7 @@ export default function AnalysisResults() {
                 <ul className="space-y-4">
                   {analysisResult.strengths.map((strength: string, index: number) => {
                     const polite = toPolite(strength)
-                    const details = generateStrengthDetails(polite)
+                    const details = (analysisResult.strengthsDetails?.[index] as string[] | undefined) || generateStrengthDetails(polite)
                     return (
                       <li
                         key={index}
@@ -458,7 +454,7 @@ export default function AnalysisResults() {
                 <ul className="space-y-4">
                   {analysisResult.weaknesses.map((weakness: string, index: number) => {
                     const polite = toPolite(weakness)
-                    const details = generateWeaknessDetails(polite)
+                    const details = (analysisResult.weaknessesDetails?.[index] as string[] | undefined) || generateWeaknessDetails(polite)
                     return (
                       <li
                         key={index}
@@ -493,7 +489,7 @@ export default function AnalysisResults() {
                 <ul className="space-y-4">
                   {analysisResult.improvements.map((improvement: string, index: number) => {
                     const polite = toPolite(improvement)
-                    const details = generateImprovementDetails(polite)
+                    const details = (analysisResult.improvementsDetails?.[index] as string[] | undefined) || generateImprovementDetails(polite)
                     return (
                       <li
                         key={index}
