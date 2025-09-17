@@ -3,6 +3,7 @@
 import { useState, useEffect } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
+import { Input } from "@/components/ui/input"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
@@ -12,6 +13,10 @@ import { useRouter } from "next/navigation"
 export default function AnalysisResults() {
   const router = useRouter()
   const [analysisResult, setAnalysisResult] = useState<any>(null)
+  const [isKakaoReady, setIsKakaoReady] = useState(false)
+  const [shareTitle, setShareTitle] = useState("")
+  const [shareSummary, setShareSummary] = useState("")
+  const [shareImageUrl, setShareImageUrl] = useState("")
 
   useEffect(() => {
     // 세션 스토리지에서 분석 결과 가져오기
@@ -35,6 +40,176 @@ export default function AnalysisResults() {
       setDefaultResult()
     }
   }, [])
+
+  // 결과 로딩 후 기본 공유값 세팅
+  useEffect(() => {
+    if (!analysisResult) return
+    try {
+      const urlBase = typeof window !== 'undefined' ? window.location.origin : ''
+      const defaultTitle = analysisResult?.questionTitle || '교직논술 분석 결과'
+      const defaultSummary = buildShareText(true)
+      const defaultImage = `${urlBase}/placeholder.jpg`
+      if (!shareTitle) setShareTitle(defaultTitle)
+      if (!shareSummary) setShareSummary(defaultSummary)
+      if (!shareImageUrl) setShareImageUrl(defaultImage)
+    } catch {}
+  }, [analysisResult])
+
+  // Kakao SDK 로드 및 초기화 (있을 때만)
+  useEffect(() => {
+    const kakaoKey = process.env.NEXT_PUBLIC_KAKAO_JAVASCRIPT_KEY
+    if (!kakaoKey) return
+
+    const existing = document.querySelector('script[data-kakao-sdk]')
+    if (existing) return
+
+    const script = document.createElement('script')
+    script.src = 'https://developers.kakao.com/sdk/js/kakao.min.js'
+    script.async = true
+    script.setAttribute('data-kakao-sdk', 'true')
+    script.onload = () => {
+      try {
+        const w = window as any
+        if (w.Kakao && !w.Kakao.isInitialized()) {
+          w.Kakao.init(kakaoKey)
+        }
+        setIsKakaoReady(true)
+      } catch {
+        setIsKakaoReady(false)
+      }
+    }
+    document.body.appendChild(script)
+  }, [])
+
+  const buildShareText = (forInit?: boolean) => {
+    const title = forInit ? (analysisResult?.questionTitle || '교직논술 분석 결과') : (shareTitle || '교직논술 분석 결과')
+    const score = `${analysisResult?.score ?? 0}/${analysisResult?.maxScore ?? 20}`
+    const strengths = (analysisResult?.strengths || []).slice(0, 2).join(' · ')
+    const weaknesses = (analysisResult?.weaknesses || []).slice(0, 2).join(' · ')
+    const base = `${title}\n점수: ${score}\n강점: ${strengths || '—'}\n보완점: ${weaknesses || '—'}`
+    return forInit ? base : (shareSummary || base)
+  }
+
+  const handleShare = async () => {
+    try {
+      const shareData = {
+        title: '교직논술 분석 결과',
+        text: buildShareText(),
+        url: typeof window !== 'undefined' ? window.location.href : undefined,
+      }
+      if (navigator.share) {
+        await navigator.share(shareData as any)
+        return
+      }
+    } catch {
+      // Web Share 실패 시 계속 폴백
+    }
+
+    try {
+      const w = window as any
+      if (isKakaoReady && w.Kakao?.Share) {
+        w.Kakao.Share.sendDefault({
+          objectType: 'feed',
+          content: {
+            title: '교직논술 분석 결과',
+            description: buildShareText(),
+            imageUrl: shareImageUrl || 'https://developers.kakao.com/assets/img/about/logos/kakaolink/kakaolink_btn_medium.png',
+            link: {
+              mobileWebUrl: window.location.href,
+              webUrl: window.location.href,
+            },
+          },
+          buttons: [
+            {
+              title: '결과 보기',
+              link: {
+                mobileWebUrl: window.location.href,
+                webUrl: window.location.href,
+              },
+            },
+          ],
+        })
+        return
+      }
+    } catch {
+      // Kakao 실패 시 계속 폴백
+    }
+
+    try {
+      await navigator.clipboard.writeText(`${buildShareText()}\n${window.location.href}`)
+      alert('링크가 클립보드에 복사되었습니다.')
+    } catch {
+      alert('공유 기능을 사용할 수 없습니다. 링크를 직접 복사해 주세요.')
+    }
+  }
+
+  // --- Polite normalization & enrichment helpers ---
+  const ensurePoliteEnding = (sentence: string) => {
+    const s = sentence.trim()
+    if (!s) return s
+    // 세미콜론/콜론/쉼표로 끝나면 마침표 추가
+    const withPeriod = /[\.\?\!]$/.test(s) ? s : s + '.'
+    // 흔한 서술어 변환
+    return withPeriod
+      .replace(/\b이다\b/g, '입니다')
+      .replace(/\b한다\b/g, '합니다')
+      .replace(/\b하였다\b|\b했다\b/g, '했습니다')
+      .replace(/\b아니다\b/g, '아닙니다')
+      .replace(/\b좋다\b/g, '좋습니다')
+      .replace(/\b적절하다\b/g, '적절합니다')
+      .replace(/\b필요하다\b/g, '필요합니다')
+      .replace(/\b부족하다\b/g, '부족합니다')
+      .replace(/\b문제가 있다\b/g, '문제가 있습니다')
+      .replace(/\b권장한다\b/g, '권장드립니다')
+  }
+
+  const toPolite = (text: string) => {
+    try {
+      return text
+        .split(/(?<=[\.\?\!\n])\s+/)
+        .map(ensurePoliteEnding)
+        .join(' ')
+        .replace(/\s{2,}/g, ' ')
+        .trim()
+    } catch {
+      return ensurePoliteEnding(text)
+    }
+  }
+
+  const generateStrengthDetails = (polite: string) => {
+    const focus = polite.slice(0, 40)
+    return [
+      `왜 중요한가: 해당 강점은 채점 루브릭의 핵심 기준과 부합하여 가치를 높입니다. 특히 '${focus}…' 대목이 설득력을 높입니다.`,
+      `증거 제시: 원문에서 핵심 문장을 인용하거나 수치·사례를 덧붙이시면 강점이 더욱 분명해집니다.`,
+      `적용 확장: 유사 문제에서도 동일한 구조(주장→근거→예시→시사점)를 유지하시면 안정적으로 높은 평가를 받으실 수 있습니다.`,
+      `[사례 중심] 학급 내 또래 갈등 상황에서 같은 원칙을 적용해 재발률이 감소한 경험을 2~3문장으로 요약해 주시면 설득력이 높아집니다.`,
+      `[통계 중심] 학교폭력 실태조사(예: 교육부, 2024) 수치를 1개 인용하여 주장과 연결해 주시면 객관성이 강화됩니다.`,
+      `[이론 인용] 비고츠키의 근접발달영역(ZPD)을 간단히 언급하며 지도 전략의 타당성을 뒷받침하시면 좋습니다.`,
+    ]
+  }
+
+  const generateWeaknessDetails = (polite: string) => {
+    const focus = polite.slice(0, 40)
+    return [
+      `영향도: '${focus}…'로 인해 주장-근거 간 연결성이 약화되어 독자의 이해와 신뢰가 떨어질 수 있습니다.`,
+      `원인 파악: 개념 정의의 미흡, 근거의 일반성, 실행 단계 누락 중 무엇이 원인인지 확인해 보시기 바랍니다.`,
+      `개선 전략: 핵심 용어를 먼저 정의하고, 사례·통계 등 검증 가능한 근거를 배치한 뒤 단계별 실행(단기·중기)을 추가하시면 좋습니다.`,
+      `[사례 중심] 현장 장면 1개(관찰 기록 형태)를 제시하여 문제의 양상과 맥락을 구체화해 주시기 바랍니다.`,
+      `[통계 중심] 관련 설문/출석/상담 기록 등 간단 지표를 1개 제시하여 개선 필요성을 수치로 드러내 주시면 좋습니다.`,
+      `[이론 인용] 피아제의 인지발달 단계 또는 반두라의 사회학습이론을 인용해 접근 적합성을 점검해 보시기 바랍니다.`,
+    ]
+  }
+
+  const generateImprovementDetails = (polite: string) => {
+    return [
+      `실행 계획: 1주차(현황 진단·관찰 기록) → 2주차(개입·수업 적용) → 4주차(효과 점검·보완)처럼 기간을 명시해 주시면 좋습니다.`,
+      `자원 연계: 담임·상담교사·학부모·관리자 등 이해관계자를 역할별로 배치하고 협력 루트를 확보하시면 실행력이 높아집니다.`,
+      `성과 지표: 참여율·행동 변화 체크리스트·피드백 설문 등 정량·정성 지표를 함께 설정해 개선 효과를 확인하시기 바랍니다.`,
+      `[사례 중심] ‘갈등 중재 회의’ 절차를 실제로 적용한 짧은 사례를 2~3단계로 정리해 주시면 재현 가능성이 높아집니다.`,
+      `[통계 중심] 목표치(예: 4주 내 결근/지각 30% 감소, 상담 참여율 80% 달성)를 사전에 설정해 추적하시기 바랍니다.`,
+      `[이론 인용] 구성주의 관점에서 협동학습 구조(Jigsaw 등)를 간단히 언급하며 활동 설계의 이론적 근거를 제시해 주십시오.`,
+    ]
+  }
 
   const setDefaultResult = () => {
     // 세션 스토리지에 데이터가 없을 때만 기본값 사용
@@ -102,7 +277,7 @@ export default function AnalysisResults() {
               <Download className="w-4 h-4 mr-2" />
               PDF 다운로드
             </Button>
-            <Button variant="outline" size="sm">
+            <Button variant="outline" size="sm" onClick={handleShare}>
               <Share2 className="w-4 h-4 mr-2" />
               공유하기
             </Button>
@@ -112,6 +287,37 @@ export default function AnalysisResults() {
 
       <div className="container mx-auto px-4 py-8 max-w-4xl">
         <div className="space-y-6">
+          {/* 공유 설정 */}
+          <Card>
+            <CardHeader>
+              <CardTitle>공유 설정</CardTitle>
+              <CardDescription>카카오톡 등으로 공유할 제목, 요약, 썸네일 이미지를 설정하실 수 있습니다.</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              <div>
+                <label className="text-sm font-medium block mb-1">제목</label>
+                <Input value={shareTitle} onChange={(e) => setShareTitle(e.target.value)} placeholder="공유 제목" />
+              </div>
+              <div>
+                <label className="text-sm font-medium block mb-1">요약</label>
+                <textarea
+                  value={shareSummary}
+                  onChange={(e) => setShareSummary(e.target.value)}
+                  placeholder="공유 본문 요약"
+                  className="w-full border rounded-md p-2 text-sm h-24"
+                />
+              </div>
+              <div>
+                <label className="text-sm font-medium block mb-1">썸네일 이미지 URL</label>
+                <Input value={shareImageUrl} onChange={(e) => setShareImageUrl(e.target.value)} placeholder="https://..." />
+              </div>
+              <div className="flex justify-end">
+                <Button variant="outline" onClick={handleShare}>
+                  <Share2 className="w-4 h-4 mr-2" /> 미리보기 공유
+                </Button>
+              </div>
+            </CardContent>
+          </Card>
           {/* Question Title */}
           <Card>
             <CardHeader>
@@ -215,19 +421,26 @@ export default function AnalysisResults() {
               </CardHeader>
               <CardContent>
                 <ul className="space-y-4">
-                  {analysisResult.strengths.map((strength: string, index: number) => (
-                    <li
-                      key={index}
-                      className="flex items-start space-x-3 p-4 bg-green-50 dark:bg-green-950/20 rounded-lg border border-green-200 dark:border-green-800"
-                    >
-                      <div className="w-7 h-7 bg-green-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-white text-sm font-bold">{index + 1}</span>
-                      </div>
-                      <div className="flex-1">
-                        <span className="text-foreground leading-relaxed text-sm">{strength}</span>
-                      </div>
-                    </li>
-                  ))}
+                  {analysisResult.strengths.map((strength: string, index: number) => {
+                    const polite = toPolite(strength)
+                    const details = generateStrengthDetails(polite)
+                    return (
+                      <li
+                        key={index}
+                        className="flex items-start space-x-3 p-4 bg-green-50 dark:bg-green-950/20 rounded-lg border border-green-200 dark:border-green-800"
+                      >
+                        <div className="w-7 h-7 bg-green-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <span className="text-white text-sm font-bold">{index + 1}</span>
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-foreground leading-relaxed text-sm mb-1">{polite}</p>
+                          {details.map((d, i) => (
+                            <p key={i} className="text-xs text-green-700 dark:text-green-300">{d}</p>
+                          ))}
+                        </div>
+                      </li>
+                    )
+                  })}
                 </ul>
               </CardContent>
             </Card>
@@ -243,19 +456,26 @@ export default function AnalysisResults() {
               </CardHeader>
               <CardContent>
                 <ul className="space-y-4">
-                  {analysisResult.weaknesses.map((weakness: string, index: number) => (
-                    <li
-                      key={index}
-                      className="flex items-start space-x-3 p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800"
-                    >
-                      <div className="w-7 h-7 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-white text-sm font-bold">{index + 1}</span>
-                      </div>
-                      <div className="flex-1">
-                        <span className="text-foreground leading-relaxed text-sm">{weakness}</span>
-                      </div>
-                    </li>
-                  ))}
+                  {analysisResult.weaknesses.map((weakness: string, index: number) => {
+                    const polite = toPolite(weakness)
+                    const details = generateWeaknessDetails(polite)
+                    return (
+                      <li
+                        key={index}
+                        className="flex items-start space-x-3 p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800"
+                      >
+                        <div className="w-7 h-7 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <span className="text-white text-sm font-bold">{index + 1}</span>
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-foreground leading-relaxed text-sm mb-1">{polite}</p>
+                          {details.map((d, i) => (
+                            <p key={i} className="text-xs text-orange-700 dark:text-orange-300">{d}</p>
+                          ))}
+                        </div>
+                      </li>
+                    )
+                  })}
                 </ul>
               </CardContent>
             </Card>
@@ -271,19 +491,26 @@ export default function AnalysisResults() {
               </CardHeader>
               <CardContent>
                 <ul className="space-y-4">
-                  {analysisResult.improvements.map((improvement: string, index: number) => (
-                    <li
-                      key={index}
-                      className="flex items-start space-x-3 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800"
-                    >
-                      <div className="w-7 h-7 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                        <span className="text-white text-sm font-bold">{index + 1}</span>
-                      </div>
-                      <div className="flex-1">
-                        <span className="text-foreground leading-relaxed text-sm">{improvement}</span>
-                      </div>
-                    </li>
-                  ))}
+                  {analysisResult.improvements.map((improvement: string, index: number) => {
+                    const polite = toPolite(improvement)
+                    const details = generateImprovementDetails(polite)
+                    return (
+                      <li
+                        key={index}
+                        className="flex items-start space-x-3 p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800"
+                      >
+                        <div className="w-7 h-7 bg-blue-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                          <span className="text-white text-sm font-bold">{index + 1}</span>
+                        </div>
+                        <div className="flex-1">
+                          <p className="text-foreground leading-relaxed text-sm mb-1">{polite}</p>
+                          {details.map((d, i) => (
+                            <p key={i} className="text-xs text-blue-700 dark:text-blue-300">{d}</p>
+                          ))}
+                        </div>
+                      </li>
+                    )
+                  })}
                 </ul>
               </CardContent>
             </Card>
@@ -304,13 +531,13 @@ export default function AnalysisResults() {
                       <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
                         <h4 className="font-semibold text-blue-800 dark:text-blue-200 mb-2">논술 내용 분석</h4>
                         <p className="text-sm text-blue-700 dark:text-blue-300 leading-relaxed">
-                          {analysisResult.detailedAnalysis.contentAnalysis}
+                          {toPolite(analysisResult.detailedAnalysis.contentAnalysis)}
                         </p>
                       </div>
                       <div className="p-4 bg-green-50 dark:bg-green-950/20 rounded-lg border border-green-200 dark:border-green-800">
                         <h4 className="font-semibold text-green-800 dark:text-green-200 mb-2">논술 체계 분석</h4>
                         <p className="text-sm text-green-700 dark:text-green-300 leading-relaxed">
-                          {analysisResult.detailedAnalysis.structureAnalysis}
+                          {toPolite(analysisResult.detailedAnalysis.structureAnalysis)}
                         </p>
                       </div>
                     </div>
@@ -318,13 +545,13 @@ export default function AnalysisResults() {
                       <div className="p-4 bg-purple-50 dark:bg-purple-950/20 rounded-lg border border-purple-200 dark:border-purple-800">
                         <h4 className="font-semibold text-purple-800 dark:text-purple-200 mb-2">교육적 관점 평가</h4>
                         <p className="text-sm text-purple-700 dark:text-purple-300 leading-relaxed">
-                          {analysisResult.detailedAnalysis.educationalPerspective}
+                          {toPolite(analysisResult.detailedAnalysis.educationalPerspective)}
                         </p>
                       </div>
                       <div className="p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800">
                         <h4 className="font-semibold text-orange-800 dark:text-orange-200 mb-2">교육학 이론 관점 평가</h4>
                         <p className="text-sm text-orange-700 dark:text-orange-300 leading-relaxed">
-                          {analysisResult.detailedAnalysis.educationalTheory}
+                          {toPolite(analysisResult.detailedAnalysis.educationalTheory)}
                         </p>
                       </div>
                     </div>

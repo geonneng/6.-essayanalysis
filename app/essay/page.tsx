@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -8,7 +8,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Upload, FileText, BarChart3, History, CreditCard, User, LogOut } from "lucide-react"
+import { Upload, FileText, BarChart3, History, CreditCard, User, LogOut, Maximize2, Minimize2 } from "lucide-react"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/useAuth"
 import { useRouter } from "next/navigation"
@@ -28,6 +29,40 @@ export default function EssayPage() {
   const [isProcessingOCR, setIsProcessingOCR] = useState(false)
   const [ocrProgress, setOcrProgress] = useState(0)
   const [ocrStatus, setOcrStatus] = useState("")
+  const [isQuestionFullscreen, setIsQuestionFullscreen] = useState(false)
+  const [isAnswerFullscreen, setIsAnswerFullscreen] = useState(false)
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // 로컬 자동 저장 및 복원
+  useEffect(() => {
+    try {
+      const q = localStorage.getItem('essay_question')
+      const a = localStorage.getItem('essay_answer')
+      if (q && !questionText) setQuestionText(q)
+      if (a && !answerText) setAnswerText(a)
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const debouncedSave = (key: string, value: string) => {
+    try {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      // 이전 값 보관(되돌리기용)
+      const prevKey = `${key}_prev`
+      const prev = localStorage.getItem(key) ?? ''
+      localStorage.setItem(prevKey, prev)
+      saveTimerRef.current = setTimeout(() => {
+        localStorage.setItem(key, value)
+      }, 500)
+    } catch {}
+  }
+
+  const handleFocusScroll = (e: React.FocusEvent<HTMLTextAreaElement>) => {
+    const target = e.currentTarget
+    setTimeout(() => {
+      target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 100)
+  }
 
   // OCR 결과를 문단 단위로 자연스럽게 이어붙이기
   const formatOcrText = (input: string) => {
@@ -64,6 +99,128 @@ export default function EssayPage() {
     return paragraphs.join("\n\n")
   }
 
+  // 클로바 OCR의 좌표 정보를 활용하여 원본 문단 레이아웃 복원 시도
+  const formatOcrTextWithLayout = (rawResult: any, fallbackText: string) => {
+    try {
+      if (!rawResult || typeof rawResult !== 'object') return formatOcrText(fallbackText)
+
+      type Line = { xLeft: number; yTop: number; yBottom: number; text: string }
+      const lines: Line[] = []
+
+      // 유틸: 다양한 키에서 꼭짓점 정보 추출
+      const getVertices = (obj: any): { x: number; y: number }[] | null => {
+        if (!obj || typeof obj !== 'object') return null
+        if (Array.isArray(obj?.vertices)) return obj.vertices
+        if (obj?.boundingPoly?.vertices) return obj.boundingPoly.vertices
+        if (obj?.boundingBox?.vertices) return obj.boundingBox.vertices
+        if (Array.isArray(obj?.boundingBox)) return obj.boundingBox
+        return null
+      }
+
+      // 1) images[0].lines[].words[] 기반으로 한 줄 텍스트 구성
+      const image0 = rawResult?.images?.[0]
+      if (Array.isArray(image0?.lines)) {
+        for (const ln of image0.lines) {
+          const words = Array.isArray(ln?.words) ? ln.words : []
+          const texts: string[] = []
+          let xLeft = Number.POSITIVE_INFINITY
+          let yTop = Number.POSITIVE_INFINITY
+          let yBottom = 0
+          for (const w of words) {
+            const v = getVertices(w)
+            if (v && v.length) {
+              const xs = v.map((p: any) => p?.x ?? 0)
+              const ys = v.map((p: any) => p?.y ?? 0)
+              xLeft = Math.min(xLeft, Math.min(...xs))
+              yTop = Math.min(yTop, Math.min(...ys))
+              yBottom = Math.max(yBottom, Math.max(...ys))
+            }
+            if (w?.text || w?.inferText) texts.push((w.text ?? w.inferText) as string)
+          }
+          const text = texts.join(' ').trim()
+          if (text) {
+            lines.push({ xLeft: isFinite(xLeft) ? xLeft : 0, yTop: isFinite(yTop) ? yTop : 0, yBottom: isFinite(yBottom) ? yBottom : 0, text })
+          }
+        }
+      }
+
+      // 2) fallback: images[0].fields[]를 라인처럼 취급하여 정렬 후 합치기
+      if (!lines.length && Array.isArray(image0?.fields)) {
+        for (const f of image0.fields) {
+          const v = getVertices(f)
+          let xLeft = 0, yTop = 0, yBottom = 0
+          if (v && v.length) {
+            const xs = v.map((p: any) => p?.x ?? 0)
+            const ys = v.map((p: any) => p?.y ?? 0)
+            xLeft = Math.min(...xs)
+            yTop = Math.min(...ys)
+            yBottom = Math.max(...ys)
+          }
+          const text = (f?.inferText || f?.text || '').toString().trim()
+          if (text) {
+            lines.push({ xLeft, yTop, yBottom, text })
+          }
+        }
+      }
+
+      if (!lines.length) return formatOcrText(fallbackText)
+
+      // 줄 정렬: 위→아래, 같은 행에서는 좌→우
+      lines.sort((a, b) => (a.yTop === b.yTop ? a.xLeft - b.xLeft : a.yTop - b.yTop))
+
+      // 기준 줄높이(중앙값)로 문단 분리 임계값 계산
+      const heights = lines.map(l => Math.max(8, l.yBottom - l.yTop)).sort((a, b) => a - b)
+      const medianHeight = heights[Math.floor(heights.length / 2)] || 16
+      const gapThreshold = Math.max(12, Math.round(medianHeight * 0.9))
+
+      const paragraphs: string[] = []
+      let buffer: Line[] = []
+
+      const flush = () => {
+        if (!buffer.length) return
+        // 같은 문단 내에서는 xLeft 증가를 이용해 자연스러운 공백을 추가
+        const minIndent = Math.min(...buffer.map(b => b.xLeft))
+        const parts: string[] = []
+        let prevRight = minIndent
+        for (const ln of buffer) {
+          const indent = ln.xLeft - minIndent
+          const needsSpace = parts.length > 0 && !/[\.,!?:;\)]$/.test(parts[parts.length - 1])
+          const spacer = needsSpace ? ' ' : ''
+          const indentCue = indent > medianHeight * 0.6 ? '' : '' // 필요 시 들여쓰기 마커 추가 가능
+          parts.push(spacer + indentCue + ln.text)
+          prevRight = ln.xLeft
+        }
+        paragraphs.push(parts.join(' ').replace(/\s{2,}/g, ' ').trim())
+        buffer = []
+      }
+
+      for (let i = 0; i < lines.length; i++) {
+        const curr = lines[i]
+        const prev = lines[i - 1]
+        if (!prev) {
+          buffer.push(curr)
+          continue
+        }
+        const verticalGap = curr.yTop - prev.yBottom
+        const newParagraphByGap = verticalGap > gapThreshold
+        const newParagraphByBullet = /^([0-9]+[\)\.\-]|[\-\u2022\u25CF\u25E6])\s+/.test(curr.text)
+        const newParagraphByIndent = (curr.xLeft - prev.xLeft) > medianHeight * 1.2
+
+        if (newParagraphByGap || newParagraphByBullet) {
+          flush()
+          buffer.push(curr)
+        } else {
+          buffer.push(curr)
+        }
+      }
+      flush()
+
+      return paragraphs.join('\n\n') || formatOcrText(fallbackText)
+    } catch {
+      return formatOcrText(fallbackText)
+    }
+  }
+
   const processOCR = async (file: File, type: "question" | "answer") => {
     setIsProcessingOCR(true)
     setOcrProgress(0)
@@ -94,10 +251,10 @@ export default function EssayPage() {
       setOcrStatus("완료!")
 
       if (type === "question") {
-        const formatted = formatOcrText(result.text || "")
+        const formatted = formatOcrTextWithLayout(result.rawResult, result.text || "")
         setQuestionText(formatted || "텍스트를 추출할 수 없습니다.")
       } else {
-        const formatted = formatOcrText(result.text || "")
+        const formatted = formatOcrTextWithLayout(result.rawResult, result.text || "")
         setAnswerText(formatted || "텍스트를 추출할 수 없습니다.")
       }
 
@@ -312,18 +469,145 @@ export default function EssayPage() {
           </TabsList>
 
           <TabsContent value="analysis" className="space-y-6">
-            <div className="grid lg:grid-cols-2 gap-4">
-              {/* File Upload Section */}
+            {/* 모바일 전용 레이아웃: 아코디언 */}
+            <div className="block lg:hidden">
+              <Accordion type="single" collapsible className="w-full">
+                <AccordionItem value="question">
+                  <AccordionTrigger>문제</AccordionTrigger>
+                  <AccordionContent>
+                    <div className="space-y-4">
+                      {isProcessingOCR && (
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                          <div className="flex items-center space-x-3">
+                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-blue-800">{ocrStatus}</p>
+                              <Progress value={ocrProgress} className="mt-2" />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      <div>
+                        <label className="text-sm font-medium text-foreground mb-2 block">문제지</label>
+                        <div
+                          className={cn(
+                            "border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors",
+                            questionFile && "border-primary bg-primary/5",
+                          )}
+                          onClick={() => document.getElementById("question-file")?.click()}
+                        >
+                          <input
+                            id="question-file"
+                            type="file"
+                            accept=".jpg,.jpeg,.png,.pdf"
+                            className="hidden"
+                            onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], "question")}
+                          />
+                          {questionFile ? (
+                            <div className="flex items-center justify-center space-x-2">
+                              <FileText className="w-5 h-5 text-primary" />
+                              <span className="text-sm text-primary">{questionFile.name}</span>
+                            </div>
+                          ) : (
+                            <div>
+                              <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                              <p className="text-sm text-muted-foreground">문제지 파일을 여기에 드래그하거나 클릭하세요</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-sm font-medium text-foreground">문제 텍스트</label>
+                          <button className="text-xs text-primary flex items-center space-x-1" onClick={() => setIsQuestionFullscreen(true)}>
+                            <Maximize2 className="w-3 h-3" />
+                            <span>전체 화면</span>
+                          </button>
+                        </div>
+                        <Textarea
+                          placeholder="문제 텍스트가 여기에 표시됩니다..."
+                          value={questionText}
+                          onFocus={handleFocusScroll}
+                          onChange={(e) => {
+                            setQuestionText(e.target.value)
+                            debouncedSave('essay_question', e.target.value)
+                          }}
+                          className="min-h-[260px]"
+                        />
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="answer">
+                  <AccordionTrigger>답안</AccordionTrigger>
+                  <AccordionContent>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-sm font-medium text-foreground mb-2 block">작성 답안</label>
+                        <div
+                          className={cn(
+                            "border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors",
+                            answerFile && "border-primary bg-primary/5",
+                          )}
+                          onClick={() => document.getElementById("answer-file")?.click()}
+                        >
+                          <input
+                            id="answer-file"
+                            type="file"
+                            accept=".jpg,.jpeg,.png,.pdf"
+                            className="hidden"
+                            onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], "answer")}
+                          />
+                          {answerFile ? (
+                            <div className="flex items-center justify-center space-x-2">
+                              <FileText className="w-5 h-5 text-primary" />
+                              <span className="text-sm text-primary">{answerFile.name}</span>
+                            </div>
+                          ) : (
+                            <div>
+                              <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                              <p className="text-sm text-muted-foreground">답안 파일을 여기에 드래그하거나 클릭하세요</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-sm font-medium text-foreground">답안 텍스트</label>
+                          <button className="text-xs text-primary flex items-center space-x-1" onClick={() => setIsAnswerFullscreen(true)}>
+                            <Maximize2 className="w-3 h-3" />
+                            <span>전체 화면</span>
+                          </button>
+                        </div>
+                        <Textarea
+                          placeholder="답안 텍스트가 여기에 표시됩니다..."
+                          value={answerText}
+                          onFocus={handleFocusScroll}
+                          onChange={(e) => {
+                            setAnswerText(e.target.value)
+                            debouncedSave('essay_answer', e.target.value)
+                          }}
+                          className="min-h-[360px]"
+                        />
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            </div>
+
+            {/* 데스크톱 레이아웃 */}
+            <div className="hidden lg:grid lg:grid-cols-2 lg:gap-4">
+              {/* 문제 섹션 */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center space-x-2">
                     <Upload className="w-5 h-5" />
-                    <span>파일 업로드</span>
+                    <span>문제</span>
                   </CardTitle>
-                  <CardDescription>문제지와 작성 답안을 업로드하세요 (JPG, PNG, PDF 지원)</CardDescription>
+                  <CardDescription>문제지 업로드 및 텍스트 수정</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {/* OCR 진행 상태 표시 */}
                   {isProcessingOCR && (
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                       <div className="flex items-center space-x-3">
@@ -335,12 +619,12 @@ export default function EssayPage() {
                       </div>
                     </div>
                   )}
-                  
+
                   <div>
                     <label className="text-sm font-medium text-foreground mb-2 block">문제지</label>
                     <div
                       className={cn(
-                        "border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors",
+                        "border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors",
                         questionFile && "border-primary bg-primary/5",
                       )}
                       onClick={() => document.getElementById("question-file")?.click()}
@@ -367,10 +651,48 @@ export default function EssayPage() {
                   </div>
 
                   <div>
+                    <label className="text-sm font-medium text-foreground mb-2 block">문제 텍스트</label>
+                    <Textarea
+                      placeholder="문제 텍스트가 여기에 표시됩니다..."
+                      value={questionText}
+                      onFocus={handleFocusScroll}
+                      onChange={(e) => {
+                        setQuestionText(e.target.value)
+                        debouncedSave('essay_question', e.target.value)
+                      }}
+                      className="min-h-[300px] lg:min-h-[420px]"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* 답안 섹션 */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Upload className="w-5 h-5" />
+                    <span>답안</span>
+                  </CardTitle>
+                  <CardDescription>답안지 업로드 및 텍스트 수정</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {isProcessingOCR && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-blue-800">{ocrStatus}</p>
+                          <Progress value={ocrProgress} className="mt-2" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
                     <label className="text-sm font-medium text-foreground mb-2 block">작성 답안</label>
                     <div
                       className={cn(
-                        "border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors",
+                        "border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors",
                         answerFile && "border-primary bg-primary/5",
                       )}
                       onClick={() => document.getElementById("answer-file")?.click()}
@@ -395,82 +717,146 @@ export default function EssayPage() {
                       )}
                     </div>
                   </div>
-                </CardContent>
-              </Card>
 
-              {/* Text Editing Section */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>텍스트 확인 및 수정</CardTitle>
-                  <CardDescription>OCR로 추출된 텍스트를 확인하고 필요시 수정하세요</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <label className="text-sm font-medium text-foreground mb-2 block">문제 텍스트</label>
-                    <Textarea
-                      placeholder="문제 텍스트가 여기에 표시됩니다..."
-                      value={questionText}
-                      onChange={(e) => setQuestionText(e.target.value)}
-                      className="min-h-[120px]"
-                    />
-                  </div>
                   <div>
                     <label className="text-sm font-medium text-foreground mb-2 block">답안 텍스트</label>
                     <Textarea
                       placeholder="답안 텍스트가 여기에 표시됩니다..."
                       value={answerText}
-                      onChange={(e) => setAnswerText(e.target.value)}
-                      className="min-h-[200px]"
+                      onFocus={handleFocusScroll}
+                      onChange={(e) => {
+                        setAnswerText(e.target.value)
+                        debouncedSave('essay_answer', e.target.value)
+                      }}
+                      className="min-h-[420px] lg:min-h-[560px]"
                     />
                   </div>
-                  <Button
-                    onClick={handleAnalysis}
-                    disabled={!questionText || !answerText || isAnalyzing || credits < 1}
-                    className="w-full"
-                    size="lg"
-                  >
-                    {isAnalyzing ? "분석 중..." : `논술 분석 시작하기 (1 크레딧 소모)`}
-                  </Button>
-                  
-                  {/* 재시도 가능한 오류 메시지 및 재시도 버튼 */}
-                  {retryableError && (
-                    <div className="mt-4 p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800">
-                      <div className="flex items-start space-x-3">
-                        <div className="w-5 h-5 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-white text-xs">!</span>
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-sm text-orange-800 dark:text-orange-200 mb-2">
-                            {retryableError}
-                          </p>
-                          <div className="text-xs text-orange-700 dark:text-orange-300 mb-3 space-y-1">
-                            <p>• AI 서버가 일시적으로 과부하 상태입니다</p>
-                            <p>• 보통 5-10분 후에 정상화됩니다</p>
-                            <p>• 오전 시간대나 사용자가 적은 시간에 시도해보세요</p>
-                          </div>
-                          <div className="flex space-x-2">
-                            <Button
-                              onClick={handleAnalysis}
-                              disabled={isAnalyzing}
-                              size="sm"
-                              className="bg-orange-500 hover:bg-orange-600 text-white"
-                            >
-                              {isAnalyzing ? "재시도 중..." : "다시 시도하기"}
-                            </Button>
-                            <Button
-                              onClick={() => setRetryableError(null)}
-                              variant="outline"
-                              size="sm"
-                            >
-                              닫기
-                            </Button>
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  )}
                 </CardContent>
               </Card>
+            </div>
+
+            {/* 전체 화면 편집 오버레이 - 문제 */}
+            {isQuestionFullscreen && (
+              <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm p-4 flex flex-col">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="font-semibold">문제 텍스트 - 전체 화면</span>
+                  <button className="text-sm flex items-center space-x-1" onClick={() => setIsQuestionFullscreen(false)}>
+                    <Minimize2 className="w-4 h-4" />
+                    <span>닫기</span>
+                  </button>
+                </div>
+                <Textarea
+                  autoFocus
+                  value={questionText}
+                  onChange={(e) => setQuestionText(e.target.value)}
+                  className="flex-1 min-h-[60vh]"
+                  placeholder="문제 텍스트 편집"
+                />
+              </div>
+            )}
+
+            {/* 전체 화면 편집 오버레이 - 답안 */}
+            {isAnswerFullscreen && (
+              <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm p-4 flex flex-col">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="font-semibold">답안 텍스트 - 전체 화면</span>
+                  <button className="text-sm flex items-center space-x-1" onClick={() => setIsAnswerFullscreen(false)}>
+                    <Minimize2 className="w-4 h-4" />
+                    <span>닫기</span>
+                  </button>
+                </div>
+                <Textarea
+                  autoFocus
+                  value={answerText}
+                  onChange={(e) => setAnswerText(e.target.value)}
+                  className="flex-1 min-h-[70vh]"
+                  placeholder="답안 텍스트 편집"
+                />
+              </div>
+            )}
+
+            <div className="mt-4 hidden lg:block">
+              <Button
+                onClick={handleAnalysis}
+                disabled={!questionText || !answerText || isAnalyzing || credits < 1}
+                className="w-full"
+                size="lg"
+              >
+                {isAnalyzing ? "분석 중..." : `논술 분석 시작하기 (1 크레딧 소모)`}
+              </Button>
+
+              {/* 재시도 가능한 오류 메시지 및 재시도 버튼 */}
+              {retryableError && (
+                <div className="mt-4 p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                  <div className="flex items-start space-x-3">
+                    <div className="w-5 h-5 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <span className="text-white text-xs">!</span>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm text-orange-800 dark:text-orange-200 mb-2">
+                        {retryableError}
+                      </p>
+                      <div className="text-xs text-orange-700 dark:text-orange-300 mb-3 space-y-1">
+                        <p>• AI 서버가 일시적으로 과부하 상태입니다</p>
+                        <p>• 보통 5-10분 후에 정상화됩니다</p>
+                        <p>• 오전 시간대나 사용자가 적은 시간에 시도해보세요</p>
+                      </div>
+                      <div className="flex space-x-2">
+                        <Button
+                          onClick={handleAnalysis}
+                          disabled={isAnalyzing}
+                          size="sm"
+                          className="bg-orange-500 hover:bg-orange-600 text-white"
+                        >
+                          {isAnalyzing ? "재시도 중..." : "다시 시도하기"}
+                        </Button>
+                        <Button
+                          onClick={() => setRetryableError(null)}
+                          variant="outline"
+                          size="sm"
+                        >
+                          닫기
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 모바일 하단 고정 액션바 */}
+            <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75 p-3">
+              <div className="flex items-center space-x-2">
+                <Button
+                  onClick={() => {
+                    const prev = localStorage.getItem('essay_question_prev')
+                    if (prev !== null) setQuestionText(prev)
+                  }}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  문제 되돌리기
+                </Button>
+                <Button
+                  onClick={() => {
+                    const prev = localStorage.getItem('essay_answer_prev')
+                    if (prev !== null) setAnswerText(prev)
+                  }}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  답안 되돌리기
+                </Button>
+              </div>
+              <Button
+                onClick={handleAnalysis}
+                disabled={!questionText || !answerText || isAnalyzing || credits < 1}
+                className="w-full mt-2"
+                size="lg"
+              >
+                {isAnalyzing ? "분석 중..." : `논술 분석 시작하기 (1 크레딧 소모)`}
+              </Button>
+              <div className="h-2" />
             </div>
 
             {/* Analysis Results Section */}
