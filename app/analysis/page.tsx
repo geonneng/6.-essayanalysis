@@ -8,6 +8,7 @@ import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { ArrowLeft, BarChart3, Download, Share2, FileText, CheckCircle, AlertTriangle, Lightbulb } from "lucide-react"
 import { useRouter } from "next/navigation"
+// PDF 라이브러리 제거 - 브라우저 내장 인쇄 기능 사용
 
 export default function AnalysisResults() {
   const router = useRouter()
@@ -308,6 +309,13 @@ export default function AnalysisResults() {
     router.push('/essay')
   }
 
+  const handleDownloadPDF = () => {
+    if (!analysisResult) return
+    
+    // 브라우저의 인쇄 기능을 사용하여 PDF로 저장
+    window.print()
+  }
+
   if (!analysisResult) {
     return (
       <div className="min-h-screen bg-background flex items-center justify-center">
@@ -322,9 +330,39 @@ export default function AnalysisResults() {
   }
 
   return (
-    <div className="min-h-screen bg-background">
+    <>
+      {/* 인쇄용 스타일 */}
+      <style jsx global>{`
+        @media print {
+          body * {
+            visibility: hidden;
+          }
+          .printable-content, .printable-content * {
+            visibility: visible;
+          }
+          .printable-content {
+            position: absolute;
+            left: 0;
+            top: 0;
+            width: 100%;
+            background: white;
+            color: black;
+          }
+          .no-print {
+            display: none !important;
+          }
+          .print-page-break {
+            page-break-before: always;
+          }
+          .print-avoid-break {
+            page-break-inside: avoid;
+          }
+        }
+      `}</style>
+      
+      <div className="min-h-screen bg-background">
       {/* Header */}
-      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50">
+      <header className="border-b border-border bg-card/50 backdrop-blur-sm sticky top-0 z-50 no-print">
         <div className="container mx-auto px-4 py-4 flex items-center justify-between">
           <div className="flex items-center space-x-4">
             <Link href="/">
@@ -339,7 +377,11 @@ export default function AnalysisResults() {
             </div>
           </div>
           <div className="flex items-center space-x-2">
-            <Button variant="outline" size="sm">
+            <Button 
+              variant="outline" 
+              size="sm" 
+              onClick={handleDownloadPDF}
+            >
               <Download className="w-4 h-4 mr-2" />
               PDF 다운로드
             </Button>
@@ -351,7 +393,7 @@ export default function AnalysisResults() {
         </div>
       </header>
 
-      <div className="container mx-auto px-4 py-8 max-w-4xl">
+      <div className="container mx-auto px-4 py-8 max-w-4xl printable-content">
         <div className="space-y-6">
           
           {/* Question Title */}
@@ -638,7 +680,7 @@ export default function AnalysisResults() {
           </div>
 
           {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row gap-4 pt-6">
+          <div className="flex flex-col sm:flex-row gap-4 pt-6 no-print">
             <Button 
               onClick={handleNewAnalysis}
               variant="outline" 
@@ -647,13 +689,17 @@ export default function AnalysisResults() {
               <ArrowLeft className="w-4 h-4 mr-2" />
               새로운 분석 시작하기
             </Button>
-            <Button className="flex-1">
+            <Button 
+              className="flex-1" 
+              onClick={handleDownloadPDF}
+            >
               <Download className="w-4 h-4 mr-2" />
-              결과 저장하기
+              PDF로 저장하기
             </Button>
           </div>
         </div>
       </div>
     </div>
+    </>
   )
 }
