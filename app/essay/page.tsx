@@ -34,31 +34,44 @@ export default function EssayPage() {
   const [isAnswerFullscreen, setIsAnswerFullscreen] = useState(false)
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null)
 
-  // 로컬 자동 저장 및 복원
-  useEffect(() => {
-    try {
-      const q = localStorage.getItem('essay_question')
-      const a = localStorage.getItem('essay_answer')
-      if (q && !questionText) setQuestionText(q)
-      if (a && !answerText) setAnswerText(a)
-    } catch {}
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [])
+  // 로컬 자동 저장 (복원은 제거)
+  // useEffect(() => {
+  //   try {
+  //     const q = localStorage.getItem('essay_question')
+  //     const a = localStorage.getItem('essay_answer')
+  //     if (q && !questionText) setQuestionText(q)
+  //     if (a && !answerText) setAnswerText(a)
+  //   } catch {}
+  //   // eslint-disable-next-line react-hooks/exhaustive-deps
+  // }, [])
 
-  // 페이지 진입 시 분석 결과 초기화
+  // 페이지 진입 시 모든 상태 초기화
   useEffect(() => {
-    // 새로고침이나 페이지 재진입 시 이전 분석 결과 초기화
+    // 새로고침이나 페이지 재진입 시 모든 상태 초기화
     setAnalysisResult(null)
     setRetryableError(null)
+    setQuestionText("")
+    setAnswerText("")
+    setQuestionFile(null)
+    setAnswerFiles([])
+    setAnswerFileTexts([])
+    
+    // localStorage도 초기화
+    try {
+      localStorage.removeItem('essay_question')
+      localStorage.removeItem('essay_answer')
+      localStorage.removeItem('essay_question_prev')
+      localStorage.removeItem('essay_answer_prev')
+    } catch {}
   }, [])
 
-  // 답안 파일 텍스트가 변경될 때마다 답안 텍스트 업데이트
-  useEffect(() => {
-    if (answerFileTexts.length > 0) {
-      updateAnswerText()
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [answerFileTexts])
+  // 답안 파일 텍스트가 변경될 때마다 답안 텍스트 업데이트 (OCR 처리 시 즉시 업데이트하므로 제거)
+  // useEffect(() => {
+  //   if (answerFileTexts.length > 0) {
+  //     updateAnswerText()
+  //   }
+  //   // eslint-disable-next-line react-hooks/exhaustive-deps
+  // }, [answerFileTexts])
 
   const debouncedSave = (key: string, value: string) => {
     try {
@@ -80,41 +93,44 @@ export default function EssayPage() {
     }, 100)
   }
 
-  // OCR 결과를 문단 단위로 자연스럽게 이어붙이기
+  // OCR 결과를 간단하게 처리
   const formatOcrText = (input: string) => {
     if (!input) return ""
     
-    // 1. 기본 정리: 연속된 공백 제거, 줄바꿈 정리
+    // 1. 기본 정리만 수행
     let text = input
       .replace(/\r\n?/g, "\n")  // 줄바꿈 통일
       .replace(/\n+/g, "\n")    // 연속된 줄바꿈을 하나로
-      .replace(/\s+/g, " ")     // 연속된 공백을 하나로
       .trim()
 
-    // 2. 문장 단위로 분리하여 자연스럽게 연결
-    const sentences = text.split(/([.!?]+\s*)/)
+    // 2. 표 추출 결과가 있는지 확인
+    if (text.includes('[표') && text.includes(']')) {
+      // 표 추출 결과는 그대로 반환 (탭으로 구분된 표 구조 유지)
+      return text
+    }
+
+    // 3. 줄 단위로 분리하여 처리
+    const lines = text.split('\n').filter(line => line.trim())
+    
+    // 4. 간단한 문단 구분만 수행
     const paragraphs: string[] = []
     let currentParagraph = ""
 
-    for (let i = 0; i < sentences.length; i += 2) {
-      const sentence = sentences[i]?.trim()
-      const punctuation = sentences[i + 1]?.trim()
+    for (let i = 0; i < lines.length; i++) {
+      const line = lines[i].trim()
+      if (!line) continue
       
-      if (!sentence) continue
-      
-      const fullSentence = sentence + (punctuation || "")
-      
-      // 문단 구분 기준: 문장이 길거나 특정 키워드로 시작
+      // 문단 구분 기준 (더 간단하게)
       const isNewParagraph = 
-        currentParagraph.length > 200 || // 문단이 충분히 길 때
-        /^(먼저|다음으로|마지막으로|첫째|둘째|셋째|넷째|다섯째)/.test(fullSentence) ||
-        /^[0-9]+[\)\.\-]/.test(fullSentence) // 번호 목록
+        /^(먼저|다음으로|마지막으로|첫째|둘째|셋째|넷째|다섯째)/.test(line) ||
+        /^[0-9]+[\)\.\-]/.test(line) // 번호 목록
         
       if (isNewParagraph && currentParagraph) {
         paragraphs.push(currentParagraph.trim())
-        currentParagraph = fullSentence
+        currentParagraph = line
       } else {
-        currentParagraph += (currentParagraph ? " " : "") + fullSentence
+        // 공백으로 연결
+        currentParagraph += (currentParagraph ? " " : "") + line
       }
     }
     
@@ -212,6 +228,10 @@ export default function EssayPage() {
     try {
       const formData = new FormData()
       formData.append('file', file)
+      // 문제 부분일 때만 표 추출 옵션 추가 (일시적으로 비활성화)
+      // if (type === "question") {
+      //   formData.append('extractTable', 'true')
+      // }
 
       setOcrProgress(30)
       setOcrStatus("OCR 처리 중...")
@@ -253,8 +273,10 @@ export default function EssayPage() {
           const newTexts = [...answerFileTexts]
           newTexts[fileIndex] = extractedText
           setAnswerFileTexts(newTexts)
-          // 답안 텍스트 자동 업데이트
-          setTimeout(() => updateAnswerText(), 100)
+          // 답안 텍스트 즉시 업데이트
+          const combined = newTexts.filter(text => text.trim()).join("\n\n")
+          setAnswerText(combined)
+          debouncedSave('essay_answer', combined)
         } else {
           setAnswerText(extractedText)
         }
@@ -285,7 +307,10 @@ export default function EssayPage() {
           const newTexts = [...answerFileTexts]
           newTexts[fileIndex] = mockText
           setAnswerFileTexts(newTexts)
-          setTimeout(() => updateAnswerText(), 100)
+          // 답안 텍스트 즉시 업데이트
+          const combined = newTexts.filter(text => text.trim()).join("\n\n")
+          setAnswerText(combined)
+          debouncedSave('essay_answer', combined)
         } else {
           setAnswerText(mockText)
         }
@@ -479,6 +504,31 @@ export default function EssayPage() {
     setRetryableError(null)
   }
 
+  const clearAllData = () => {
+    // 모든 상태 초기화
+    setAnalysisResult(null)
+    setRetryableError(null)
+    setQuestionText("")
+    setAnswerText("")
+    setQuestionFile(null)
+    setAnswerFiles([])
+    setAnswerFileTexts([])
+    
+    // localStorage 완전 초기화
+    try {
+      localStorage.removeItem('essay_question')
+      localStorage.removeItem('essay_answer')
+      localStorage.removeItem('essay_question_prev')
+      localStorage.removeItem('essay_answer_prev')
+      // 모든 essay 관련 키 제거
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('essay_')) {
+          localStorage.removeItem(key)
+        }
+      })
+    } catch {}
+  }
+
   const handleViewAnalysis = (analysisItem: any) => {
     console.log('히스토리에서 선택된 분석 아이템:', analysisItem)
     // 세션 스토리지에 저장 (이전 데이터 덮어쓰기)
@@ -506,6 +556,15 @@ export default function EssayPage() {
               <span className="hidden sm:inline">{credits}</span>
               <span className="sm:hidden">{credits}</span>
             </Badge>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={clearAllData}
+              className="text-muted-foreground hover:text-foreground"
+              title="모든 데이터 초기화"
+            >
+              <X className="w-4 h-4" />
+            </Button>
             <Button variant="outline" size="sm" className="hidden sm:flex bg-transparent">
               <User className="w-4 h-4 mr-2" />
               {user?.email || "사용자"}
