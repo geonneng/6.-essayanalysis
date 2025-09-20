@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -8,7 +8,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Upload, FileText, BarChart3, History, CreditCard, User, LogOut, Eye, Loader2 } from "lucide-react"
+import { Upload, FileText, BarChart3, History, CreditCard, User, LogOut, Eye, Loader2, Maximize2, Minimize2 } from "lucide-react"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { cn } from "@/lib/utils"
 import Tesseract from 'tesseract.js'
 
@@ -23,6 +24,41 @@ export default function Demo() {
   const [isProcessingOCR, setIsProcessingOCR] = useState(false)
   const [ocrProgress, setOcrProgress] = useState(0)
   const [ocrStatus, setOcrStatus] = useState("")
+  const [isQuestionFullscreen, setIsQuestionFullscreen] = useState(false)
+  const [isAnswerFullscreen, setIsAnswerFullscreen] = useState(false)
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null)
+
+  // 로컬 자동 저장 및 복원
+  useEffect(() => {
+    try {
+      const q = localStorage.getItem('demo_question')
+      const a = localStorage.getItem('demo_answer')
+      if (q && !questionText) setQuestionText(q)
+      if (a && !answerText) setAnswerText(a)
+    } catch {}
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [])
+
+  const debouncedSave = (key: string, value: string) => {
+    try {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      const prevKey = `${key}_prev`
+      const prev = localStorage.getItem(key) ?? ''
+      localStorage.setItem(prevKey, prev)
+      saveTimerRef.current = setTimeout(() => {
+        localStorage.setItem(key, value)
+      }, 500)
+    } catch {}
+  }
+
+  const handleFocusScroll = (e: React.FocusEvent<HTMLTextAreaElement>) => {
+    const target = e.currentTarget
+    setTimeout(() => {
+      target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 100)
+  }
+  const [isQuestionFullscreen, setIsQuestionFullscreen] = useState(false)
+  const [isAnswerFullscreen, setIsAnswerFullscreen] = useState(false)
 
   const handleFileUpload = async (file: File, type: "question" | "answer") => {
     if (type === "question") {
@@ -194,22 +230,159 @@ export default function Demo() {
           </TabsList>
 
           <TabsContent value="analysis" className="space-y-6">
-            <div className="grid lg:grid-cols-2 gap-4">
-              {/* File Upload Section */}
+            {/* 모바일 전용 레이아웃: 아코디언 */}
+            <div className="block lg:hidden">
+              <Accordion type="single" collapsible className="w-full">
+                <AccordionItem value="question">
+                  <AccordionTrigger>문제</AccordionTrigger>
+                  <AccordionContent>
+                    <div className="space-y-4">
+                      {isProcessingOCR && (
+                        <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                          <div className="flex items-center space-x-3 mb-2">
+                            <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                            <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                              {ocrStatus}
+                            </span>
+                          </div>
+                        </div>
+                      )}
+                      <div>
+                        <label className="text-sm font-medium text-foreground mb-2 block">문제지</label>
+                        <div
+                          className={cn(
+                            "border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors",
+                            questionFile && "border-primary bg-primary/5",
+                          )}
+                          onClick={() => document.getElementById("question-file")?.click()}
+                        >
+                          <input
+                            id="question-file"
+                            type="file"
+                            accept=".jpg,.jpeg,.png,.pdf"
+                            className="hidden"
+                            onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], "question")}
+                          />
+                          {questionFile ? (
+                            <div className="flex items-center justify-center space-x-2">
+                              <FileText className="w-5 h-5 text-primary" />
+                              <span className="text-sm text-primary">{questionFile.name}</span>
+                            </div>
+                          ) : (
+                            <div>
+                              <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                              <p className="text-sm text-muted-foreground">문제지 파일을 여기에 드래그하거나 클릭하세요</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-sm font-medium text-foreground">문제 텍스트</label>
+                          <button className="text-xs text-primary flex items-center space-x-1" onClick={() => setIsQuestionFullscreen(true)}>
+                            <Maximize2 className="w-3 h-3" />
+                            <span>전체 화면</span>
+                          </button>
+                        </div>
+                    <Textarea
+                          placeholder="문제 텍스트가 여기에 표시됩니다..."
+                          value={questionText}
+                      onFocus={handleFocusScroll}
+                      onChange={(e) => {
+                        setQuestionText(e.target.value)
+                        debouncedSave('demo_question', e.target.value)
+                      }}
+                          className="min-h-[260px]"
+                        />
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="answer">
+                  <AccordionTrigger>답안</AccordionTrigger>
+                  <AccordionContent>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-sm font-medium text-foreground mb-2 block">작성 답안</label>
+                        <div
+                          className={cn(
+                            "border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors",
+                            answerFile && "border-primary bg-primary/5",
+                          )}
+                          onClick={() => document.getElementById("answer-file")?.click()}
+                        >
+                          <input
+                            id="answer-file"
+                            type="file"
+                            accept=".jpg,.jpeg,.png,.pdf"
+                            className="hidden"
+                            onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], "answer")}
+                          />
+                          {answerFile ? (
+                            <div className="flex items-center justify-center space-x-2">
+                              <FileText className="w-5 h-5 text-primary" />
+                              <span className="text-sm text-primary">{answerFile.name}</span>
+                            </div>
+                          ) : (
+                            <div>
+                              <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                              <p className="text-sm text-muted-foreground">답안 파일을 여기에 드래그하거나 클릭하세요</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-sm font-medium text-foreground">답안 텍스트</label>
+                          <button className="text-xs text-primary flex items-center space-x-1" onClick={() => setIsAnswerFullscreen(true)}>
+                            <Maximize2 className="w-3 h-3" />
+                            <span>전체 화면</span>
+                          </button>
+                        </div>
+                    <Textarea
+                          placeholder="답안 텍스트가 여기에 표시됩니다..."
+                          value={answerText}
+                      onFocus={handleFocusScroll}
+                      onChange={(e) => {
+                        setAnswerText(e.target.value)
+                        debouncedSave('demo_answer', e.target.value)
+                      }}
+                          className="min-h-[360px]"
+                        />
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            </div>
+
+            {/* 데스크톱 레이아웃 */}
+            <div className="hidden lg:grid lg:grid-cols-2 lg:gap-4">
+              {/* 문제 섹션 */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center space-x-2">
                     <Upload className="w-5 h-5" />
-                    <span>파일 업로드</span>
+                    <span>문제</span>
                   </CardTitle>
-                  <CardDescription>문제지와 작성 답안을 업로드하세요 (JPG, PNG, PDF 지원)</CardDescription>
+                  <CardDescription>문제지 업로드 및 텍스트 수정</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
+                  {isProcessingOCR && (
+                    <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                      <div className="flex items-center space-x-3 mb-2">
+                        <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                        <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                          {ocrStatus}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <label className="text-sm font-medium text-foreground mb-2 block">문제지</label>
                     <div
                       className={cn(
-                        "border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors",
+                        "border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors",
                         questionFile && "border-primary bg-primary/5",
                       )}
                       onClick={() => document.getElementById("question-file")?.click()}
@@ -234,12 +407,47 @@ export default function Demo() {
                       )}
                     </div>
                   </div>
+                  <div>
+                    <label className="text-sm font-medium text-foreground mb-2 block">문제 텍스트</label>
+                    <Textarea
+                      placeholder="문제 텍스트가 여기에 표시됩니다..."
+                      value={questionText}
+                      onFocus={handleFocusScroll}
+                      onChange={(e) => {
+                        setQuestionText(e.target.value)
+                        debouncedSave('demo_question', e.target.value)
+                      }}
+                      className="min-h-[300px] lg:min-h-[420px]"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
 
+              {/* 답안 섹션 */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Upload className="w-5 h-5" />
+                    <span>답안</span>
+                  </CardTitle>
+                  <CardDescription>답안지 업로드 및 텍스트 수정</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {isProcessingOCR && (
+                    <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                      <div className="flex items-center space-x-3 mb-2">
+                        <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
+                        <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
+                          {ocrStatus}
+                        </span>
+                      </div>
+                    </div>
+                  )}
                   <div>
                     <label className="text-sm font-medium text-foreground mb-2 block">작성 답안</label>
                     <div
                       className={cn(
-                        "border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors",
+                        "border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors",
                         answerFile && "border-primary bg-primary/5",
                       )}
                       onClick={() => document.getElementById("answer-file")?.click()}
@@ -264,56 +472,108 @@ export default function Demo() {
                       )}
                     </div>
                   </div>
-                </CardContent>
-              </Card>
-
-              {/* Text Editing Section */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>텍스트 확인 및 수정</CardTitle>
-                  <CardDescription>OCR로 추출된 텍스트를 확인하고 필요시 수정하세요</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  {/* OCR Progress */}
-                  {isProcessingOCR && (
-                    <div className="p-4 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
-                      <div className="flex items-center space-x-3 mb-2">
-                        <Loader2 className="w-5 h-5 text-blue-600 animate-spin" />
-                        <span className="text-sm font-medium text-blue-800 dark:text-blue-200">
-                          {ocrStatus}
-                        </span>
-                      </div>
-                    </div>
-                  )}
-                  <div>
-                    <label className="text-sm font-medium text-foreground mb-2 block">문제 텍스트</label>
-                    <Textarea
-                      placeholder="문제 텍스트가 여기에 표시됩니다..."
-                      value={questionText}
-                      onChange={(e) => setQuestionText(e.target.value)}
-                      className="min-h-[120px]"
-                    />
-                  </div>
                   <div>
                     <label className="text-sm font-medium text-foreground mb-2 block">답안 텍스트</label>
                     <Textarea
                       placeholder="답안 텍스트가 여기에 표시됩니다..."
                       value={answerText}
-                      onChange={(e) => setAnswerText(e.target.value)}
-                      className="min-h-[200px]"
+                      onFocus={handleFocusScroll}
+                      onChange={(e) => {
+                        setAnswerText(e.target.value)
+                        debouncedSave('demo_answer', e.target.value)
+                      }}
+                      className="min-h-[420px] lg:min-h-[560px]"
                     />
                   </div>
-                  <Button
-                    onClick={handleAnalysis}
-                    disabled={!questionText || !answerText || isAnalyzing}
-                    className="w-full"
-                    size="lg"
-                  >
-                    {isAnalyzing ? "분석 중..." : `데모 분석 시작하기 (무료)`}
-                  </Button>
                 </CardContent>
               </Card>
             </div>
+
+            <div className="mt-4 hidden lg:block">
+              <Button
+                onClick={handleAnalysis}
+                disabled={!questionText || !answerText || isAnalyzing}
+                className="w-full"
+                size="lg"
+              >
+                {isAnalyzing ? "분석 중..." : `데모 분석 시작하기 (무료)`}
+              </Button>
+            </div>
+
+            {/* 모바일 하단 고정 액션바 */}
+            <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75 p-3">
+              <div className="flex items-center space-x-2">
+                <Button
+                  onClick={() => {
+                    const prev = localStorage.getItem('demo_question_prev')
+                    if (prev !== null) setQuestionText(prev)
+                  }}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  문제 되돌리기
+                </Button>
+                <Button
+                  onClick={() => {
+                    const prev = localStorage.getItem('demo_answer_prev')
+                    if (prev !== null) setAnswerText(prev)
+                  }}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  답안 되돌리기
+                </Button>
+              </div>
+              <Button
+                onClick={handleAnalysis}
+                disabled={!questionText || !answerText || isAnalyzing}
+                className="w-full mt-2"
+                size="lg"
+              >
+                {isAnalyzing ? "분석 중..." : `데모 분석 시작하기 (무료)`}
+              </Button>
+              <div className="h-2" />
+            </div>
+
+            {/* 전체 화면 편집 오버레이 - 문제 */}
+            {isQuestionFullscreen && (
+              <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm p-4 flex flex-col">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="font-semibold">문제 텍스트 - 전체 화면</span>
+                  <button className="text-sm flex items-center space-x-1" onClick={() => setIsQuestionFullscreen(false)}>
+                    <Minimize2 className="w-4 h-4" />
+                    <span>닫기</span>
+                  </button>
+                </div>
+                <Textarea
+                  autoFocus
+                  value={questionText}
+                  onChange={(e) => setQuestionText(e.target.value)}
+                  className="flex-1 min-h-[60vh]"
+                  placeholder="문제 텍스트 편집"
+                />
+              </div>
+            )}
+
+            {/* 전체 화면 편집 오버레이 - 답안 */}
+            {isAnswerFullscreen && (
+              <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm p-4 flex flex-col">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="font-semibold">답안 텍스트 - 전체 화면</span>
+                  <button className="text-sm flex items-center space-x-1" onClick={() => setIsAnswerFullscreen(false)}>
+                    <Minimize2 className="w-4 h-4" />
+                    <span>닫기</span>
+                  </button>
+                </div>
+                <Textarea
+                  autoFocus
+                  value={answerText}
+                  onChange={(e) => setAnswerText(e.target.value)}
+                  className="flex-1 min-h-[70vh]"
+                  placeholder="답안 텍스트 편집"
+                />
+              </div>
+            )}
 
             {/* Analysis Results Section */}
             <Card>

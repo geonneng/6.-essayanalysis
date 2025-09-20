@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useRef, useState } from "react"
 import Link from "next/link"
 import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
@@ -8,7 +8,8 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Upload, FileText, BarChart3, History, CreditCard, User, LogOut } from "lucide-react"
+import { Upload, FileText, BarChart3, History, CreditCard, User, LogOut, Maximize2, Minimize2, X, ArrowUp, ArrowDown, Plus } from "lucide-react"
+import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/useAuth"
 import { useRouter } from "next/navigation"
@@ -18,7 +19,8 @@ export default function EssayPage() {
   const router = useRouter()
   const [credits, setCredits] = useState(25)
   const [questionFile, setQuestionFile] = useState<File | null>(null)
-  const [answerFile, setAnswerFile] = useState<File | null>(null)
+  const [answerFiles, setAnswerFiles] = useState<File[]>([])
+  const [answerFileTexts, setAnswerFileTexts] = useState<string[]>([])
   const [questionText, setQuestionText] = useState("")
   const [answerText, setAnswerText] = useState("")
   const [isAnalyzing, setIsAnalyzing] = useState(false)
@@ -28,43 +30,172 @@ export default function EssayPage() {
   const [isProcessingOCR, setIsProcessingOCR] = useState(false)
   const [ocrProgress, setOcrProgress] = useState(0)
   const [ocrStatus, setOcrStatus] = useState("")
+  const [isQuestionFullscreen, setIsQuestionFullscreen] = useState(false)
+  const [isAnswerFullscreen, setIsAnswerFullscreen] = useState(false)
+  const saveTimerRef = useRef<NodeJS.Timeout | null>(null)
 
-  // OCR 결과를 문단 단위로 자연스럽게 이어붙이기
-  const formatOcrText = (input: string) => {
-    if (!input) return ""
-    const lines = input.replace(/\r\n?/g, "\n").split("\n")
-    const paragraphs: string[] = []
-    let buffer = ""
+  // 로컬 자동 저장 (복원은 제거)
+  // useEffect(() => {
+  //   try {
+  //     const q = localStorage.getItem('essay_question')
+  //     const a = localStorage.getItem('essay_answer')
+  //     if (q && !questionText) setQuestionText(q)
+  //     if (a && !answerText) setAnswerText(a)
+  //   } catch {}
+  //   // eslint-disable-next-line react-hooks/exhaustive-deps
+  // }, [])
 
-    const shouldAddSpace = (prev: string) => {
-      if (!prev) return false
-      return !/[\.,!?:;\)]$/.test(prev)
-    }
+  // 페이지 진입 시 모든 상태 초기화
+  useEffect(() => {
+    // 새로고침이나 페이지 재진입 시 모든 상태 초기화
+    setAnalysisResult(null)
+    setRetryableError(null)
+    setQuestionText("")
+    setAnswerText("")
+    setQuestionFile(null)
+    setAnswerFiles([])
+    setAnswerFileTexts([])
+    
+    // localStorage도 초기화
+    try {
+      localStorage.removeItem('essay_question')
+      localStorage.removeItem('essay_answer')
+      localStorage.removeItem('essay_question_prev')
+      localStorage.removeItem('essay_answer_prev')
+    } catch {}
+    
+    // sessionStorage도 초기화 (이전 분석 결과 제거)
+    try {
+      sessionStorage.removeItem('latestAnalysisResult')
+      sessionStorage.removeItem('latestAnalysisResult_enriched')
+    } catch {}
+  }, [])
 
-    for (const raw of lines) {
-      const line = raw.trim()
-      if (!line) {
-        if (buffer.trim()) {
-          paragraphs.push(buffer.trim())
-          buffer = ""
-        }
-        continue
-      }
+  // 답안 파일 텍스트가 변경될 때마다 답안 텍스트 업데이트 (OCR 처리 시 즉시 업데이트하므로 제거)
+  // useEffect(() => {
+  //   if (answerFileTexts.length > 0) {
+  //     updateAnswerText()
+  //   }
+  //   // eslint-disable-next-line react-hooks/exhaustive-deps
+  // }, [answerFileTexts])
 
-      if (buffer.endsWith("-")) {
-        buffer = buffer.slice(0, -1) + line.replace(/^\s+/, "")
-      } else if (!buffer) {
-        buffer = line
-      } else {
-        buffer += (shouldAddSpace(buffer) ? " " : "") + line
-      }
-    }
-
-    if (buffer.trim()) paragraphs.push(buffer.trim())
-    return paragraphs.join("\n\n")
+  const debouncedSave = (key: string, value: string) => {
+    try {
+      if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
+      // 이전 값 보관(되돌리기용)
+      const prevKey = `${key}_prev`
+      const prev = localStorage.getItem(key) ?? ''
+      localStorage.setItem(prevKey, prev)
+      saveTimerRef.current = setTimeout(() => {
+        localStorage.setItem(key, value)
+      }, 500)
+    } catch {}
   }
 
-  const processOCR = async (file: File, type: "question" | "answer") => {
+  const handleFocusScroll = (e: React.FocusEvent<HTMLTextAreaElement>) => {
+    const target = e.currentTarget
+    setTimeout(() => {
+      target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
+    }, 100)
+  }
+
+  // OCR 결과를 최소한으로 처리 (줄바꿈 보존)
+  const formatOcrText = (input: string) => {
+    if (!input) return ""
+    
+    // 1. 기본 정리만 수행 - 줄바꿈은 그대로 유지
+    let text = input
+      .replace(/\r\n?/g, "\n")  // 줄바꿈 통일
+      .replace(/\n{3,}/g, "\n\n")  // 3개 이상의 연속된 줄바꿈을 2개로
+      .trim()
+
+    // 2. 각 줄의 앞뒤 공백만 제거하고 그대로 반환
+    const lines = text.split('\n')
+    const cleanedLines = lines.map(line => line.trim()).filter(line => line)
+    
+    return cleanedLines.join('\n')
+  }
+
+  // 여러 파일의 OCR 결과를 순서대로 이어붙이기
+  const combineAnswerTexts = () => {
+    if (answerFileTexts.length === 0) return answerText
+    
+    const combinedTexts = answerFileTexts.filter(text => text.trim()).join("\n\n")
+    return combinedTexts || answerText
+  }
+
+  // 답안 텍스트 업데이트 (여러 파일 + 수동 입력)
+  const updateAnswerText = () => {
+    const combined = combineAnswerTexts()
+    setAnswerText(combined)
+    debouncedSave('essay_answer', combined)
+  }
+
+  // 클로바 OCR 결과를 간단하고 안정적으로 처리
+  const formatOcrTextWithLayout = (rawResult: any, fallbackText: string) => {
+    try {
+      // 1. API에서 이미 추출한 텍스트를 우선 사용 (가장 안정적)
+      if (fallbackText && fallbackText.trim()) {
+        return formatOcrText(fallbackText)
+      }
+
+      // 2. rawResult에서 텍스트 추출 시도 (fallback)
+      if (!rawResult || typeof rawResult !== 'object') {
+        return formatOcrText(fallbackText)
+      }
+
+      let extractedText = ""
+
+      // 클로바 OCR 응답 구조에 맞게 텍스트 추출
+      if (rawResult.images && Array.isArray(rawResult.images) && rawResult.images.length > 0) {
+        const image = rawResult.images[0]
+        
+        // 방법 1: fields에서 텍스트 추출 (가장 안정적)
+        if (image.fields && Array.isArray(image.fields)) {
+          const fieldTexts = image.fields
+            .map((field: any) => field.inferText || field.text || '')
+            .filter((text: string) => text.trim())
+          
+          if (fieldTexts.length > 0) {
+            extractedText = fieldTexts.join('\n')
+          }
+        }
+        
+        // 방법 2: lines에서 텍스트 추출
+        if (!extractedText && image.lines && Array.isArray(image.lines)) {
+          const lineTexts = image.lines
+            .map((line: any) => {
+              if (line.words && Array.isArray(line.words)) {
+                return line.words
+                  .map((word: any) => word.inferText || word.text || '')
+                  .filter((text: string) => text.trim())
+                  .join(' ')
+              }
+              return line.inferText || line.text || ''
+            })
+            .filter((text: string) => text.trim())
+          
+          if (lineTexts.length > 0) {
+            extractedText = lineTexts.join('\n')
+          }
+        }
+      }
+
+      // 3. 추출된 텍스트가 있으면 포맷팅하여 반환
+      if (extractedText.trim()) {
+        return formatOcrText(extractedText)
+      }
+
+      // 4. 모든 방법이 실패하면 fallback 텍스트 사용
+      return formatOcrText(fallbackText)
+
+    } catch (error) {
+      console.error('OCR 텍스트 처리 오류:', error)
+      return formatOcrText(fallbackText)
+    }
+  }
+
+  const processOCR = async (file: File, type: "question" | "answer", fileIndex?: number) => {
     setIsProcessingOCR(true)
     setOcrProgress(0)
     setOcrStatus("이미지 업로드 중...")
@@ -93,12 +224,33 @@ export default function EssayPage() {
       setOcrProgress(100)
       setOcrStatus("완료!")
 
+      // OCR 결과 디버깅
+      console.log('OCR API 응답:', {
+        text: result.text,
+        hasRawResult: !!result.rawResult,
+        rawResultKeys: result.rawResult ? Object.keys(result.rawResult) : []
+      })
+
+      const formatted = formatOcrTextWithLayout(result.rawResult, result.text || "")
+      const extractedText = formatted || "텍스트를 추출할 수 없습니다."
+      
+      console.log('최종 추출된 텍스트:', extractedText.substring(0, 200) + '...')
+
       if (type === "question") {
-        const formatted = formatOcrText(result.text || "")
-        setQuestionText(formatted || "텍스트를 추출할 수 없습니다.")
+        setQuestionText(extractedText)
       } else {
-        const formatted = formatOcrText(result.text || "")
-        setAnswerText(formatted || "텍스트를 추출할 수 없습니다.")
+        // 답안의 경우 여러 파일 처리
+        if (fileIndex !== undefined) {
+          const newTexts = [...answerFileTexts]
+          newTexts[fileIndex] = extractedText
+          setAnswerFileTexts(newTexts)
+          // 답안 텍스트 즉시 업데이트
+          const combined = newTexts.filter(text => text.trim()).join("\n\n")
+          setAnswerText(combined)
+          debouncedSave('essay_answer', combined)
+        } else {
+          setAnswerText(extractedText)
+        }
       }
 
       // 1초 후 상태 초기화
@@ -120,9 +272,19 @@ export default function EssayPage() {
           "다음 상황에서 교사로서 어떻게 대응할 것인지 서술하시오.\n\n학급에서 일부 학생들이 다른 학생을 따돌리는 상황이 발생했습니다. 피해 학생은 위축되어 있고, 가해 학생들은 자신들의 행동이 잘못되었다는 것을 인식하지 못하고 있습니다.",
         )
       } else {
-        setAnswerText(
-          "이러한 상황에서 교사로서 다음과 같이 대응하겠습니다.\n\n첫째, 즉시 상황을 파악하고 피해 학생을 보호하겠습니다. 피해 학생과 개별 상담을 통해 심리적 안정을 도모하고, 필요시 상담교사나 학부모와 연계하여 지원체계를 구축하겠습니다.\n\n둘째, 가해 학생들과 개별 및 집단 상담을 실시하여 자신들의 행동이 타인에게 미치는 영향을 깨닫게 하고, 공감 능력을 기르도록 지도하겠습니다.\n\n셋째, 학급 전체를 대상으로 인권 교육과 배려 문화 조성을 위한 활동을 전개하여 재발 방지에 힘쓰겠습니다.",
-        )
+        const mockText = "이러한 상황에서 교사로서 다음과 같이 대응하겠습니다.\n\n첫째, 즉시 상황을 파악하고 피해 학생을 보호하겠습니다. 피해 학생과 개별 상담을 통해 심리적 안정을 도모하고, 필요시 상담교사나 학부모와 연계하여 지원체계를 구축하겠습니다.\n\n둘째, 가해 학생들과 개별 및 집단 상담을 실시하여 자신들의 행동이 타인에게 미치는 영향을 깨닫게 하고, 공감 능력을 기르도록 지도하겠습니다.\n\n셋째, 학급 전체를 대상으로 인권 교육과 배려 문화 조성을 위한 활동을 전개하여 재발 방지에 힘쓰겠습니다."
+        
+        if (fileIndex !== undefined) {
+          const newTexts = [...answerFileTexts]
+          newTexts[fileIndex] = mockText
+          setAnswerFileTexts(newTexts)
+          // 답안 텍스트 즉시 업데이트
+          const combined = newTexts.filter(text => text.trim()).join("\n\n")
+          setAnswerText(combined)
+          debouncedSave('essay_answer', combined)
+        } else {
+          setAnswerText(mockText)
+        }
       }
       
       alert(`OCR 처리 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}\n\nMock 데이터로 대체됩니다.`)
@@ -132,12 +294,67 @@ export default function EssayPage() {
   const handleFileUpload = (file: File, type: "question" | "answer") => {
     if (type === "question") {
       setQuestionFile(file)
+      processOCR(file, type)
     } else {
-      setAnswerFile(file)
+      // 답안의 경우 여러 파일 추가
+      const newFiles = [...answerFiles, file]
+      setAnswerFiles(newFiles)
+      
+      // 새로운 파일 텍스트 배열 확장
+      const newTexts = [...answerFileTexts, ""]
+      setAnswerFileTexts(newTexts)
+      
+      // OCR 처리 (새 파일의 인덱스 전달)
+      processOCR(file, type, newFiles.length - 1)
     }
+  }
+
+  const handleMultipleFileUpload = (files: FileList, type: "question" | "answer") => {
+    if (type === "question") {
+      // 문제는 하나의 파일만 허용
+      if (files.length > 0) {
+        handleFileUpload(files[0], type)
+      }
+    } else {
+      // 답안은 여러 파일 허용
+      const fileArray = Array.from(files)
+      const newFiles = [...answerFiles, ...fileArray]
+      setAnswerFiles(newFiles)
+      
+      // 새로운 파일 텍스트 배열 확장
+      const newTexts = [...answerFileTexts, ...Array(fileArray.length).fill("")]
+      setAnswerFileTexts(newTexts)
+      
+      // 각 파일에 대해 OCR 처리
+      fileArray.forEach((file, index) => {
+        const fileIndex = answerFiles.length + index
+        processOCR(file, type, fileIndex)
+      })
+    }
+  }
+
+  const removeAnswerFile = (index: number) => {
+    const newFiles = answerFiles.filter((_, i) => i !== index)
+    const newTexts = answerFileTexts.filter((_, i) => i !== index)
+    setAnswerFiles(newFiles)
+    setAnswerFileTexts(newTexts)
+    updateAnswerText()
+  }
+
+  const moveAnswerFile = (fromIndex: number, toIndex: number) => {
+    const newFiles = [...answerFiles]
+    const newTexts = [...answerFileTexts]
     
-    // OCR 처리 시작
-    processOCR(file, type)
+    // 파일과 텍스트를 함께 이동
+    const [movedFile] = newFiles.splice(fromIndex, 1)
+    const [movedText] = newTexts.splice(fromIndex, 1)
+    
+    newFiles.splice(toIndex, 0, movedFile)
+    newTexts.splice(toIndex, 0, movedText)
+    
+    setAnswerFiles(newFiles)
+    setAnswerFileTexts(newTexts)
+    updateAnswerText()
   }
 
   const handleAnalysis = async () => {
@@ -151,6 +368,10 @@ export default function EssayPage() {
       return
     }
 
+    // 새로운 분석 시작 시 이전 분석 결과 정리
+    sessionStorage.removeItem('latestAnalysisResult')
+    sessionStorage.removeItem('latestAnalysisResult_enriched')
+    
     setIsAnalyzing(true)
     setRetryableError(null) // 이전 오류 상태 초기화
 
@@ -214,8 +435,8 @@ export default function EssayPage() {
       const savedData = sessionStorage.getItem('latestAnalysisResult')
       console.log('세션 스토리지에 저장된 데이터:', savedData)
       
-      // /analysis 페이지로 이동 (세션 스토리지만 사용)
-      router.push('/analysis')
+      // 분석 결과가 현재 페이지에 표시되도록 하고, 사용자가 원할 때 /analysis 페이지로 이동할 수 있도록 함
+      // router.push('/analysis') 제거
       
     } catch (e: any) {
       console.error('분석 오류:', e)
@@ -253,6 +474,36 @@ export default function EssayPage() {
     router.push("/")
   }
 
+  const clearAnalysisResult = () => {
+    setAnalysisResult(null)
+    setRetryableError(null)
+  }
+
+  const clearAllData = () => {
+    // 모든 상태 초기화
+    setAnalysisResult(null)
+    setRetryableError(null)
+    setQuestionText("")
+    setAnswerText("")
+    setQuestionFile(null)
+    setAnswerFiles([])
+    setAnswerFileTexts([])
+    
+    // localStorage 완전 초기화
+    try {
+      localStorage.removeItem('essay_question')
+      localStorage.removeItem('essay_answer')
+      localStorage.removeItem('essay_question_prev')
+      localStorage.removeItem('essay_answer_prev')
+      // 모든 essay 관련 키 제거
+      Object.keys(localStorage).forEach(key => {
+        if (key.startsWith('essay_')) {
+          localStorage.removeItem(key)
+        }
+      })
+    } catch {}
+  }
+
   const handleViewAnalysis = (analysisItem: any) => {
     console.log('히스토리에서 선택된 분석 아이템:', analysisItem)
     // 세션 스토리지에 저장 (이전 데이터 덮어쓰기)
@@ -280,6 +531,15 @@ export default function EssayPage() {
               <span className="hidden sm:inline">{credits}</span>
               <span className="sm:hidden">{credits}</span>
             </Badge>
+            <Button 
+              variant="ghost" 
+              size="sm" 
+              onClick={clearAllData}
+              className="text-muted-foreground hover:text-foreground"
+              title="모든 데이터 초기화"
+            >
+              <X className="w-4 h-4" />
+            </Button>
             <Button variant="outline" size="sm" className="hidden sm:flex bg-transparent">
               <User className="w-4 h-4 mr-2" />
               {user?.email || "사용자"}
@@ -312,18 +572,206 @@ export default function EssayPage() {
           </TabsList>
 
           <TabsContent value="analysis" className="space-y-6">
-            <div className="grid lg:grid-cols-2 gap-4">
-              {/* File Upload Section */}
+            {/* 모바일 전용 레이아웃: 아코디언 */}
+            <div className="block lg:hidden">
+              <Accordion type="single" collapsible className="w-full">
+                <AccordionItem value="question">
+                  <AccordionTrigger>문제</AccordionTrigger>
+                  <AccordionContent>
+                    <div className="space-y-4">
+                      {isProcessingOCR && (
+                        <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                          <div className="flex items-center space-x-3">
+                            <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                            <div className="flex-1">
+                              <p className="text-sm font-medium text-blue-800">{ocrStatus}</p>
+                              <Progress value={ocrProgress} className="mt-2" />
+                            </div>
+                          </div>
+                        </div>
+                      )}
+                      <div>
+                        <label className="text-sm font-medium text-foreground mb-2 block">문제지</label>
+                        <div
+                          className={cn(
+                            "border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors",
+                            questionFile && "border-primary bg-primary/5",
+                          )}
+                          onClick={() => document.getElementById("question-file")?.click()}
+                        >
+                          <input
+                            id="question-file"
+                            type="file"
+                            accept=".jpg,.jpeg,.png,.pdf"
+                            className="hidden"
+                            onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], "question")}
+                          />
+                          {questionFile ? (
+                            <div className="flex items-center justify-center space-x-2">
+                              <FileText className="w-5 h-5 text-primary" />
+                              <span className="text-sm text-primary">{questionFile.name}</span>
+                            </div>
+                          ) : (
+                            <div>
+                              <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                              <p className="text-sm text-muted-foreground">문제지 파일을 여기에 드래그하거나 클릭하세요</p>
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-sm font-medium text-foreground">문제 텍스트</label>
+                          <button className="text-xs text-primary flex items-center space-x-1" onClick={() => setIsQuestionFullscreen(true)}>
+                            <Maximize2 className="w-3 h-3" />
+                            <span>전체 화면</span>
+                          </button>
+                        </div>
+                        <Textarea
+                          placeholder="문제 텍스트가 여기에 표시됩니다..."
+                          value={questionText}
+                          onFocus={handleFocusScroll}
+                          onChange={(e) => {
+                            setQuestionText(e.target.value)
+                            debouncedSave('essay_question', e.target.value)
+                          }}
+                          className="min-h-[260px]"
+                        />
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+                <AccordionItem value="answer">
+                  <AccordionTrigger>답안</AccordionTrigger>
+                  <AccordionContent>
+                    <div className="space-y-4">
+                      <div>
+                        <label className="text-sm font-medium text-foreground mb-2 block">작성 답안</label>
+                        <div
+                          className={cn(
+                            "border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors",
+                            answerFiles.length > 0 && "border-primary bg-primary/5",
+                          )}
+                          onClick={() => document.getElementById("answer-file")?.click()}
+                        >
+                          <input
+                            id="answer-file"
+                            type="file"
+                            accept=".jpg,.jpeg,.png,.pdf"
+                            multiple
+                            className="hidden"
+                            onChange={(e) => e.target.files && handleMultipleFileUpload(e.target.files, "answer")}
+                          />
+                          {answerFiles.length > 0 ? (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-center space-x-2">
+                                <FileText className="w-5 h-5 text-primary" />
+                                <span className="text-sm text-primary">{answerFiles.length}개 파일 업로드됨</span>
+                              </div>
+                              <p className="text-xs text-muted-foreground">클릭하여 추가 파일 업로드</p>
+                            </div>
+                          ) : (
+                            <div>
+                              <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
+                              <p className="text-sm text-muted-foreground">답안 파일을 여기에 드래그하거나 클릭하세요</p>
+                              <p className="text-xs text-muted-foreground mt-1">여러 장의 답안을 순서대로 업로드할 수 있습니다</p>
+                            </div>
+                          )}
+                        </div>
+                        
+                        {/* 업로드된 파일 목록 */}
+                        {answerFiles.length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            <p className="text-xs font-medium text-foreground">업로드된 파일 ({answerFiles.length}개)</p>
+                            {answerFiles.map((file, index) => (
+                              <div key={index} className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
+                                <div className="flex items-center space-x-2 flex-1 min-w-0">
+                                  <FileText className="w-4 h-4 text-primary flex-shrink-0" />
+                                  <span className="text-sm text-foreground truncate">{file.name}</span>
+                                  <Badge variant="outline" className="text-xs">
+                                    {index + 1}번째
+                                  </Badge>
+                                </div>
+                                <div className="flex items-center space-x-1">
+                                  {index > 0 && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-6 w-6 p-0"
+                                      onClick={() => moveAnswerFile(index, index - 1)}
+                                    >
+                                      <ArrowUp className="w-3 h-3" />
+                                    </Button>
+                                  )}
+                                  {index < answerFiles.length - 1 && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-6 w-6 p-0"
+                                      onClick={() => moveAnswerFile(index, index + 1)}
+                                    >
+                                      <ArrowDown className="w-3 h-3" />
+                                    </Button>
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                                    onClick={() => removeAnswerFile(index)}
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
+                      </div>
+                      <div>
+                        <div className="flex items-center justify-between mb-2">
+                          <label className="text-sm font-medium text-foreground">답안 텍스트</label>
+                          <button className="text-xs text-primary flex items-center space-x-1" onClick={() => setIsAnswerFullscreen(true)}>
+                            <Maximize2 className="w-3 h-3" />
+                            <span>전체 화면</span>
+                          </button>
+                        </div>
+                        <Textarea
+                          placeholder="답안 텍스트가 여기에 표시됩니다..."
+                          value={answerText}
+                          onFocus={handleFocusScroll}
+                          onChange={(e) => {
+                            setAnswerText(e.target.value)
+                            debouncedSave('essay_answer', e.target.value)
+                          }}
+                          className="min-h-[360px]"
+                        />
+                        {answerFiles.length > 0 && (
+                          <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                            <p className="text-xs text-blue-800 dark:text-blue-200">
+                              💡 여러 파일의 OCR 결과가 자동으로 결합되어 위 텍스트에 표시됩니다. 
+                              필요시 수동으로 편집할 수 있습니다.
+                            </p>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </AccordionContent>
+                </AccordionItem>
+              </Accordion>
+            </div>
+
+            {/* 데스크톱 레이아웃 */}
+            <div className="hidden lg:grid lg:grid-cols-2 lg:gap-4">
+              {/* 문제 섹션 */}
               <Card>
                 <CardHeader>
                   <CardTitle className="flex items-center space-x-2">
                     <Upload className="w-5 h-5" />
-                    <span>파일 업로드</span>
+                    <span>문제</span>
                   </CardTitle>
-                  <CardDescription>문제지와 작성 답안을 업로드하세요 (JPG, PNG, PDF 지원)</CardDescription>
+                  <CardDescription>문제지 업로드 및 텍스트 수정</CardDescription>
                 </CardHeader>
                 <CardContent className="space-y-4">
-                  {/* OCR 진행 상태 표시 */}
                   {isProcessingOCR && (
                     <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
                       <div className="flex items-center space-x-3">
@@ -335,12 +783,12 @@ export default function EssayPage() {
                       </div>
                     </div>
                   )}
-                  
+
                   <div>
                     <label className="text-sm font-medium text-foreground mb-2 block">문제지</label>
                     <div
                       className={cn(
-                        "border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors",
+                        "border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors",
                         questionFile && "border-primary bg-primary/5",
                       )}
                       onClick={() => document.getElementById("question-file")?.click()}
@@ -367,119 +815,295 @@ export default function EssayPage() {
                   </div>
 
                   <div>
+                    <label className="text-sm font-medium text-foreground mb-2 block">문제 텍스트</label>
+                    <Textarea
+                      placeholder="문제 텍스트가 여기에 표시됩니다..."
+                      value={questionText}
+                      onFocus={handleFocusScroll}
+                      onChange={(e) => {
+                        setQuestionText(e.target.value)
+                        debouncedSave('essay_question', e.target.value)
+                      }}
+                      className="min-h-[300px] lg:min-h-[420px]"
+                    />
+                  </div>
+                </CardContent>
+              </Card>
+
+              {/* 답안 섹션 */}
+              <Card>
+                <CardHeader>
+                  <CardTitle className="flex items-center space-x-2">
+                    <Upload className="w-5 h-5" />
+                    <span>답안</span>
+                  </CardTitle>
+                  <CardDescription>답안지 업로드 및 텍스트 수정</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-4">
+                  {isProcessingOCR && (
+                    <div className="bg-blue-50 border border-blue-200 rounded-lg p-4">
+                      <div className="flex items-center space-x-3">
+                        <div className="animate-spin rounded-full h-5 w-5 border-b-2 border-blue-600"></div>
+                        <div className="flex-1">
+                          <p className="text-sm font-medium text-blue-800">{ocrStatus}</p>
+                          <Progress value={ocrProgress} className="mt-2" />
+                        </div>
+                      </div>
+                    </div>
+                  )}
+
+                  <div>
                     <label className="text-sm font-medium text-foreground mb-2 block">작성 답안</label>
                     <div
                       className={cn(
-                        "border-2 border-dashed border-border rounded-lg p-6 text-center cursor-pointer hover:border-primary/50 transition-colors",
-                        answerFile && "border-primary bg-primary/5",
+                        "border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors",
+                        answerFiles.length > 0 && "border-primary bg-primary/5",
                       )}
-                      onClick={() => document.getElementById("answer-file")?.click()}
+                      onClick={() => document.getElementById("answer-file-desktop")?.click()}
                     >
                       <input
-                        id="answer-file"
+                        id="answer-file-desktop"
                         type="file"
                         accept=".jpg,.jpeg,.png,.pdf"
+                        multiple
                         className="hidden"
-                        onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], "answer")}
+                        onChange={(e) => e.target.files && handleMultipleFileUpload(e.target.files, "answer")}
                       />
-                      {answerFile ? (
-                        <div className="flex items-center justify-center space-x-2">
-                          <FileText className="w-5 h-5 text-primary" />
-                          <span className="text-sm text-primary">{answerFile.name}</span>
+                      {answerFiles.length > 0 ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-center space-x-2">
+                            <FileText className="w-5 h-5 text-primary" />
+                            <span className="text-sm text-primary">{answerFiles.length}개 파일 업로드됨</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">클릭하여 추가 파일 업로드</p>
                         </div>
                       ) : (
                         <div>
                           <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
                           <p className="text-sm text-muted-foreground">답안 파일을 여기에 드래그하거나 클릭하세요</p>
+                          <p className="text-xs text-muted-foreground mt-1">여러 장의 답안을 순서대로 업로드할 수 있습니다</p>
                         </div>
                       )}
                     </div>
+                    
+                    {/* 업로드된 파일 목록 */}
+                    {answerFiles.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        <p className="text-xs font-medium text-foreground">업로드된 파일 ({answerFiles.length}개)</p>
+                        {answerFiles.map((file, index) => (
+                          <div key={index} className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
+                            <div className="flex items-center space-x-2 flex-1 min-w-0">
+                              <FileText className="w-4 h-4 text-primary flex-shrink-0" />
+                              <span className="text-sm text-foreground truncate">{file.name}</span>
+                              <Badge variant="outline" className="text-xs">
+                                {index + 1}번째
+                              </Badge>
+                            </div>
+                            <div className="flex items-center space-x-1">
+                              {index > 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 w-6 p-0"
+                                  onClick={() => moveAnswerFile(index, index - 1)}
+                                >
+                                  <ArrowUp className="w-3 h-3" />
+                                </Button>
+                              )}
+                              {index < answerFiles.length - 1 && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 w-6 p-0"
+                                  onClick={() => moveAnswerFile(index, index + 1)}
+                                >
+                                  <ArrowDown className="w-3 h-3" />
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                                onClick={() => removeAnswerFile(index)}
+                              >
+                                <X className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
-                </CardContent>
-              </Card>
 
-              {/* Text Editing Section */}
-              <Card>
-                <CardHeader>
-                  <CardTitle>텍스트 확인 및 수정</CardTitle>
-                  <CardDescription>OCR로 추출된 텍스트를 확인하고 필요시 수정하세요</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-4">
-                  <div>
-                    <label className="text-sm font-medium text-foreground mb-2 block">문제 텍스트</label>
-                    <Textarea
-                      placeholder="문제 텍스트가 여기에 표시됩니다..."
-                      value={questionText}
-                      onChange={(e) => setQuestionText(e.target.value)}
-                      className="min-h-[120px]"
-                    />
-                  </div>
                   <div>
                     <label className="text-sm font-medium text-foreground mb-2 block">답안 텍스트</label>
                     <Textarea
                       placeholder="답안 텍스트가 여기에 표시됩니다..."
                       value={answerText}
-                      onChange={(e) => setAnswerText(e.target.value)}
-                      className="min-h-[200px]"
+                      onFocus={handleFocusScroll}
+                      onChange={(e) => {
+                        setAnswerText(e.target.value)
+                        debouncedSave('essay_answer', e.target.value)
+                      }}
+                      className="min-h-[420px] lg:min-h-[560px]"
                     />
-                  </div>
-                  <Button
-                    onClick={handleAnalysis}
-                    disabled={!questionText || !answerText || isAnalyzing || credits < 1}
-                    className="w-full"
-                    size="lg"
-                  >
-                    {isAnalyzing ? "분석 중..." : `논술 분석 시작하기 (1 크레딧 소모)`}
-                  </Button>
-                  
-                  {/* 재시도 가능한 오류 메시지 및 재시도 버튼 */}
-                  {retryableError && (
-                    <div className="mt-4 p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800">
-                      <div className="flex items-start space-x-3">
-                        <div className="w-5 h-5 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
-                          <span className="text-white text-xs">!</span>
-                        </div>
-                        <div className="flex-1">
-                          <p className="text-sm text-orange-800 dark:text-orange-200 mb-2">
-                            {retryableError}
-                          </p>
-                          <div className="text-xs text-orange-700 dark:text-orange-300 mb-3 space-y-1">
-                            <p>• AI 서버가 일시적으로 과부하 상태입니다</p>
-                            <p>• 보통 5-10분 후에 정상화됩니다</p>
-                            <p>• 오전 시간대나 사용자가 적은 시간에 시도해보세요</p>
-                          </div>
-                          <div className="flex space-x-2">
-                            <Button
-                              onClick={handleAnalysis}
-                              disabled={isAnalyzing}
-                              size="sm"
-                              className="bg-orange-500 hover:bg-orange-600 text-white"
-                            >
-                              {isAnalyzing ? "재시도 중..." : "다시 시도하기"}
-                            </Button>
-                            <Button
-                              onClick={() => setRetryableError(null)}
-                              variant="outline"
-                              size="sm"
-                            >
-                              닫기
-                            </Button>
-                          </div>
-                        </div>
+                    {answerFiles.length > 0 && (
+                      <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                        <p className="text-xs text-blue-800 dark:text-blue-200">
+                          💡 여러 파일의 OCR 결과가 자동으로 결합되어 위 텍스트에 표시됩니다. 
+                          필요시 수동으로 편집할 수 있습니다.
+                        </p>
                       </div>
-                    </div>
-                  )}
+                    )}
+                  </div>
                 </CardContent>
               </Card>
+            </div>
+
+            {/* 전체 화면 편집 오버레이 - 문제 */}
+            {isQuestionFullscreen && (
+              <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm p-4 flex flex-col">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="font-semibold">문제 텍스트 - 전체 화면</span>
+                  <button className="text-sm flex items-center space-x-1" onClick={() => setIsQuestionFullscreen(false)}>
+                    <Minimize2 className="w-4 h-4" />
+                    <span>닫기</span>
+                  </button>
+                </div>
+                <Textarea
+                  autoFocus
+                  value={questionText}
+                  onChange={(e) => setQuestionText(e.target.value)}
+                  className="flex-1 min-h-[60vh]"
+                  placeholder="문제 텍스트 편집"
+                />
+              </div>
+            )}
+
+            {/* 전체 화면 편집 오버레이 - 답안 */}
+            {isAnswerFullscreen && (
+              <div className="fixed inset-0 z-50 bg-background/95 backdrop-blur-sm p-4 flex flex-col">
+                <div className="flex items-center justify-between mb-3">
+                  <span className="font-semibold">답안 텍스트 - 전체 화면</span>
+                  <button className="text-sm flex items-center space-x-1" onClick={() => setIsAnswerFullscreen(false)}>
+                    <Minimize2 className="w-4 h-4" />
+                    <span>닫기</span>
+                  </button>
+                </div>
+                <Textarea
+                  autoFocus
+                  value={answerText}
+                  onChange={(e) => setAnswerText(e.target.value)}
+                  className="flex-1 min-h-[70vh]"
+                  placeholder="답안 텍스트 편집"
+                />
+              </div>
+            )}
+
+            <div className="mt-4 hidden lg:block">
+              <Button
+                onClick={handleAnalysis}
+                disabled={!questionText || !answerText || isAnalyzing || credits < 1}
+                className="w-full"
+                size="lg"
+              >
+                {isAnalyzing ? "분석 중..." : `논술 분석 시작하기 (1 크레딧 소모)`}
+              </Button>
+
+              {/* 재시도 가능한 오류 메시지 및 재시도 버튼 */}
+              {retryableError && (
+                <div className="mt-4 p-4 bg-orange-50 dark:bg-orange-950/20 rounded-lg border border-orange-200 dark:border-orange-800">
+                  <div className="flex items-start space-x-3">
+                    <div className="w-5 h-5 bg-orange-500 rounded-full flex items-center justify-center flex-shrink-0 mt-0.5">
+                      <span className="text-white text-xs">!</span>
+                    </div>
+                    <div className="flex-1">
+                      <p className="text-sm text-orange-800 dark:text-orange-200 mb-2">
+                        {retryableError}
+                      </p>
+                      <div className="text-xs text-orange-700 dark:text-orange-300 mb-3 space-y-1">
+                        <p>• AI 서버가 일시적으로 과부하 상태입니다</p>
+                        <p>• 보통 5-10분 후에 정상화됩니다</p>
+                        <p>• 오전 시간대나 사용자가 적은 시간에 시도해보세요</p>
+                      </div>
+                      <div className="flex space-x-2">
+                        <Button
+                          onClick={handleAnalysis}
+                          disabled={isAnalyzing}
+                          size="sm"
+                          className="bg-orange-500 hover:bg-orange-600 text-white"
+                        >
+                          {isAnalyzing ? "재시도 중..." : "다시 시도하기"}
+                        </Button>
+                        <Button
+                          onClick={() => setRetryableError(null)}
+                          variant="outline"
+                          size="sm"
+                        >
+                          닫기
+                        </Button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+              )}
+            </div>
+
+            {/* 모바일 하단 고정 액션바 */}
+            <div className="lg:hidden fixed bottom-0 left-0 right-0 z-40 border-t bg-card/95 backdrop-blur supports-[backdrop-filter]:bg-card/75 p-3">
+              <div className="flex items-center space-x-2">
+                <Button
+                  onClick={() => {
+                    const prev = localStorage.getItem('essay_question_prev')
+                    if (prev !== null) setQuestionText(prev)
+                  }}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  문제 되돌리기
+                </Button>
+                <Button
+                  onClick={() => {
+                    const prev = localStorage.getItem('essay_answer_prev')
+                    if (prev !== null) setAnswerText(prev)
+                  }}
+                  variant="outline"
+                  className="flex-1"
+                >
+                  답안 되돌리기
+                </Button>
+              </div>
+              <Button
+                onClick={handleAnalysis}
+                disabled={!questionText || !answerText || isAnalyzing || credits < 1}
+                className="w-full mt-2"
+                size="lg"
+              >
+                {isAnalyzing ? "분석 중..." : `논술 분석 시작하기 (1 크레딧 소모)`}
+              </Button>
+              <div className="h-2" />
             </div>
 
             {/* Analysis Results Section */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <BarChart3 className="w-5 h-5" />
-                  <span>분석 결과</span>
-                </CardTitle>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <BarChart3 className="w-5 h-5" />
+                    <span>분석 결과</span>
+                  </div>
+                  {analysisResult && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearAnalysisResult}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="w-4 h-4 mr-1" />
+                      초기화
+                    </Button>
+                  )}
+                </div>
                 <CardDescription>AI가 분석한 논술 평가 결과입니다</CardDescription>
               </CardHeader>
               <CardContent>
@@ -565,6 +1189,18 @@ export default function EssayPage() {
                           </li>
                         ))}
                       </ul>
+                    </div>
+
+                    {/* 상세 결과 보기 버튼 */}
+                    <div className="pt-4 border-t border-border">
+                      <Button 
+                        onClick={() => router.push('/analysis')}
+                        className="w-full"
+                        variant="outline"
+                      >
+                        <BarChart3 className="w-4 h-4 mr-2" />
+                        상세 결과 보기
+                      </Button>
                     </div>
                   </div>
                 ) : (

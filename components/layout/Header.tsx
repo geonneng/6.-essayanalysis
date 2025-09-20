@@ -6,11 +6,12 @@ import { FileText, User, LogOut } from 'lucide-react'
 import { useAuth } from '@/hooks/useAuth'
 import { Avatar, AvatarFallback } from '@/components/ui/avatar'
 import { DropdownMenu, DropdownMenuContent, DropdownMenuItem, DropdownMenuTrigger } from '@/components/ui/dropdown-menu'
+import { ClientOnly } from '@/components/ClientOnly'
 
 export const Header = () => {
-  const { user, loading, signOut } = useAuth()
+  const { user, loading, signOut, isClient } = useAuth()
 
-  console.log('🎯 Header 렌더링 - user:', user, 'loading:', loading)
+  console.log('🎯 Header 렌더링 - user:', user, 'loading:', loading, 'isClient:', isClient)
 
   const handleSignOut = async () => {
     try {
@@ -37,57 +38,71 @@ export const Header = () => {
         </div>
         
         <nav className="flex items-center space-x-4">
-          {loading ? (
-            // 로딩 중일 때
-            <div className="flex items-center space-x-4">
-              <div className="w-8 h-8 bg-gray-200 rounded-full animate-pulse"></div>
-              <div className="w-20 h-8 bg-gray-200 rounded animate-pulse"></div>
-            </div>
-          ) : user ? (
-            // 로그인된 사용자
-            <div className="flex items-center space-x-4">
-              <Button variant="outline" asChild>
-                <Link href="/dashboard">대시보드</Link>
-              </Button>
-              <DropdownMenu>
-                <DropdownMenuTrigger asChild>
-                  <Button variant="ghost" className="flex items-center space-x-2">
-                    <Avatar className="h-8 w-8">
-                      <AvatarFallback className="bg-blue-100 text-blue-600 text-sm">
-                        {getInitials(user.email)}
-                      </AvatarFallback>
-                    </Avatar>
-                    <span className="hidden sm:inline text-sm">{user.email}</span>
-                  </Button>
-                </DropdownMenuTrigger>
-                <DropdownMenuContent align="end" className="w-56">
-                  <DropdownMenuItem asChild>
-                    <Link href="/dashboard" className="flex items-center space-x-2">
-                      <User className="h-4 w-4" />
-                      <span>내 정보</span>
-                    </Link>
-                  </DropdownMenuItem>
-                  <DropdownMenuItem 
-                    onClick={handleSignOut}
-                    className="flex items-center space-x-2 text-red-600"
-                  >
-                    <LogOut className="h-4 w-4" />
-                    <span>로그아웃</span>
-                  </DropdownMenuItem>
-                </DropdownMenuContent>
-              </DropdownMenu>
-            </div>
-          ) : (
-            // 로그인되지 않은 사용자
-            <div className="flex items-center space-x-4">
-              <Button variant="outline" asChild>
-                <Link href="/auth">로그인</Link>
-              </Button>
-              <Button asChild>
-                <Link href="/auth">회원가입</Link>
-              </Button>
-            </div>
-          )}
+          <ClientOnly 
+            fallback={
+              // 서버 렌더링 시 기본 상태 (로그인되지 않은 상태)
+              <div className="flex items-center space-x-4">
+                <Button variant="outline" asChild>
+                  <Link href="/auth">로그인</Link>
+                </Button>
+                <Button asChild>
+                  <Link href="/auth">회원가입</Link>
+                </Button>
+              </div>
+            }
+          >
+            {loading ? (
+              // 로딩 중일 때
+              <div className="flex items-center space-x-4">
+                <div className="w-8 h-8 bg-gray-200 rounded-full animate-pulse"></div>
+                <div className="w-20 h-8 bg-gray-200 rounded animate-pulse"></div>
+              </div>
+            ) : user ? (
+              // 로그인된 사용자
+              <div className="flex items-center space-x-4">
+                <Button variant="outline" asChild>
+                  <Link href="/dashboard">대시보드</Link>
+                </Button>
+                <DropdownMenu>
+                  <DropdownMenuTrigger asChild>
+                    <Button variant="ghost" className="flex items-center space-x-2">
+                      <Avatar className="h-8 w-8">
+                        <AvatarFallback className="bg-blue-100 text-blue-600 text-sm">
+                          {getInitials(user.email)}
+                        </AvatarFallback>
+                      </Avatar>
+                      <span className="hidden sm:inline text-sm">{user.email}</span>
+                    </Button>
+                  </DropdownMenuTrigger>
+                  <DropdownMenuContent align="end" className="w-56">
+                    <DropdownMenuItem asChild>
+                      <Link href="/dashboard" className="flex items-center space-x-2">
+                        <User className="h-4 w-4" />
+                        <span>내 정보</span>
+                      </Link>
+                    </DropdownMenuItem>
+                    <DropdownMenuItem 
+                      onClick={handleSignOut}
+                      className="flex items-center space-x-2 text-red-600"
+                    >
+                      <LogOut className="h-4 w-4" />
+                      <span>로그아웃</span>
+                    </DropdownMenuItem>
+                  </DropdownMenuContent>
+                </DropdownMenu>
+              </div>
+            ) : (
+              // 로그인되지 않은 사용자
+              <div className="flex items-center space-x-4">
+                <Button variant="outline" asChild>
+                  <Link href="/auth">로그인</Link>
+                </Button>
+                <Button asChild>
+                  <Link href="/auth">회원가입</Link>
+                </Button>
+              </div>
+            )}
+          </ClientOnly>
         </nav>
       </div>
     </header>

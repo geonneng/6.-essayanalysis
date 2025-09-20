@@ -6,15 +6,17 @@ import { Card, CardContent, CardDescription, CardHeader, CardTitle } from '@/com
 import { FileText, BarChart3, CheckCircle, Upload } from 'lucide-react'
 import { Header } from '@/components/layout/Header'
 import { useAuth } from '@/hooks/useAuth'
+import { ClientOnly } from '@/components/ClientOnly'
 
 export default function HomePage() {
-  const { user, loading } = useAuth()
+  const { user, loading, isClient } = useAuth()
 
   const getStartButton = () => {
-    if (loading) {
+    // 서버 렌더링 중이거나 로딩 중일 때는 항상 로그인 페이지로 이동하는 버튼 표시
+    if (!isClient || loading) {
       return (
-        <Button size="lg" className="text-lg px-8" disabled>
-          로딩 중...
+        <Button size="lg" className="text-lg px-8" asChild>
+          <Link href="/auth">무료로 시작하기</Link>
         </Button>
       )
     }
@@ -52,7 +54,13 @@ export default function HomePage() {
             초등 교원 임용시험 준비를 더 효율적으로 시작하세요.
           </p>
           <div className="flex flex-col sm:flex-row gap-4 justify-center">
-            {getStartButton()}
+            <ClientOnly fallback={
+              <Button size="lg" className="text-lg px-8" asChild>
+                <Link href="/auth">무료로 시작하기</Link>
+              </Button>
+            }>
+              {getStartButton()}
+            </ClientOnly>
             <Button size="lg" variant="outline" className="text-lg px-8" asChild>
               <Link href="/demo">데모 보기</Link>
             </Button>
@@ -121,7 +129,13 @@ export default function HomePage() {
           <p className="text-xl text-gray-600 mb-8">
             무료 계정으로 AI 논술 분석을 체험해보고, 합격에 한 걸음 더 가까워지세요.
           </p>
-          {getStartButton()}
+          <ClientOnly fallback={
+            <Button size="lg" className="text-lg px-8" asChild>
+              <Link href="/auth">무료로 시작하기</Link>
+            </Button>
+          }>
+            {getStartButton()}
+          </ClientOnly>
         </div>
       </section>
     </div>
