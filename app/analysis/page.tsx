@@ -13,9 +13,7 @@ export default function AnalysisResults() {
   const router = useRouter()
   const [analysisResult, setAnalysisResult] = useState<any>(null)
   const [isKakaoReady, setIsKakaoReady] = useState(false)
-  const [isEnriched, setIsEnriched] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
-  const enrichLockRef = useRef(false)
 
   useEffect(() => {
     // 세션 스토리지에서 분석 결과 가져오기
@@ -27,7 +25,6 @@ export default function AnalysisResults() {
       try {
         const parsed = JSON.parse(storedEnriched)
         setAnalysisResult(parsed)
-        setIsEnriched(true)
         return
       } catch {
         // ignore and fall back to raw
@@ -51,7 +48,6 @@ export default function AnalysisResults() {
           } : undefined,
         }
         setAnalysisResult(normalized)
-        setIsEnriched(false)
         // 세션 스토리지에서 제거하지 않음 (페이지 새로고침 시에도 유지)
       } catch (error) {
         console.error('분석 결과 파싱 오류:', error)
@@ -67,78 +63,7 @@ export default function AnalysisResults() {
     }
   }, [])
 
-  // 분석 결과를 기반으로 다채로운 해설을 서버에서 생성
-  useEffect(() => {
-    const enrich = async () => {
-      if (!analysisResult || isEnriched) return
-      if (enrichLockRef.current) return
-      enrichLockRef.current = true
-      try {
-        const res = await fetch('/api/enrich', {
-          method: 'POST',
-          headers: { 'Content-Type': 'application/json' },
-          body: JSON.stringify({
-            strengths: analysisResult.strengths || [],
-            weaknesses: analysisResult.weaknesses || [],
-            improvements: analysisResult.improvements || [],
-            detailedAnalysis: analysisResult.detailedAnalysis || {},
-            questionTitle: analysisResult.questionTitle || '',
-            preferences: {
-              theories: ['비고츠키 ZPD', '반두라 사회학습', '피아제 인지발달', '브루너 발견학습', '콜버그 도덕성'],
-              statsSources: ['교육부 실태조사', '학업성취도 평가', '학급 자체 설문'],
-              domains: ['학급경영', '학교폭력 예방', '학부모 소통', '협동학습'],
-              tone: '전문적이고 친절한 교원 평가 톤'
-            }
-          })
-        })
-        if (!res.ok) {
-          alert('AI 확장 생성에 실패했습니다. 잠시 후 다시 시도해 주세요.')
-          return
-        }
-        const data = await res.json()
-        const toArr = (arr: any) => Array.isArray(arr) ? arr : []
-        const sDetails: string[][] = toArr(data.strengthsDetails)
-        const wDetails: string[][] = toArr(data.weaknessesDetails)
-        const iDetails: string[][] = toArr(data.improvementsDetails)
-
-        // 작은 보조 문구를 없애고, 본문에 예시를 자연스럽게 병합(2개 정도 선택)
-        const mergeExamples = (base: string, extras: string[] = []) => {
-          const pick = extras.slice(0, 2).map((x) => toPolite(x))
-          const merged = [toPolite(base), ...pick].join('\n\n')
-          return merged
-        }
-        const mergedStrengths = (analysisResult.strengths || [])
-          .map((s: string, idx: number) => mergeExamples(s, sDetails[idx]))
-          .map((t: string) => sanitizeExampleLabels(t))
-        const mergedWeaknesses = (analysisResult.weaknesses || []).map((s: string, idx: number) => mergeExamples(s, wDetails[idx]))
-        const mergedImprovements = (analysisResult.improvements || []).map((s: string, idx: number) => mergeExamples(s, iDetails[idx]))
-
-        const enrichedPayload = {
-          ...analysisResult,
-          strengths: mergedStrengths,
-          weaknesses: mergedWeaknesses,
-          improvements: mergedImprovements,
-          detailedAnalysis: {
-            ...analysisResult.detailedAnalysis,
-            contentAnalysis: toPolite(data?.detailed?.contentAnalysis || analysisResult.detailedAnalysis?.contentAnalysis || ''),
-            structureAnalysis: toPolite(data?.detailed?.structureAnalysis || analysisResult.detailedAnalysis?.structureAnalysis || ''),
-            educationalPerspective: toPolite(data?.detailed?.educationalPerspective || analysisResult.detailedAnalysis?.educationalPerspective || ''),
-            educationalTheory: toPolite(data?.detailed?.educationalTheory || analysisResult.detailedAnalysis?.educationalTheory || ''),
-          }
-        }
-        setAnalysisResult(enrichedPayload)
-        try {
-          sessionStorage.setItem('latestAnalysisResult_enriched', JSON.stringify(enrichedPayload))
-        } catch {}
-        setIsEnriched(true)
-      } catch {
-        alert('AI 확장 생성 중 오류가 발생했습니다. 잠시 후 다시 시도해 주세요.')
-      } finally {
-        enrichLockRef.current = false
-      }
-    }
-    enrich()
-  }, [analysisResult, isEnriched])
+  // enrich API 호출 제거 - 상세분석 결과가 즉시 표시되도록 함
 
   // 공유 설정 섹션은 제거되었습니다
 
