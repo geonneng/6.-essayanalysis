@@ -4,6 +4,7 @@ import { AuthUser, AuthState } from '@/lib/types/auth'
 import { getCurrentUser } from '@/lib/auth'
 
 interface AuthContextType extends AuthState {
+  isClient: boolean
   signOut: () => Promise<void>
   refreshUser: () => Promise<void>
 }

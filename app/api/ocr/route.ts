@@ -64,10 +64,18 @@ export async function POST(request: Request) {
     if (isJson) {
       try {
         // Clova OCR 응답 구조 우선 처리 (fields/lines/words 등)
-        // 1) images[].fields[].inferText
+        // 1) images[].fields[].inferText - 좌표 기반 정렬
         const fields = ocrData?.images?.[0]?.fields
         if (Array.isArray(fields)) {
-          extractedText = fields.map((f: any) => f?.inferText).filter(Boolean).join('\n')
+          // 좌표 정보가 있으면 y좌표로 정렬
+          const sortedFields = fields
+            .filter((f: any) => f?.inferText)
+            .sort((a: any, b: any) => {
+              const aY = a?.boundingPoly?.vertices?.[0]?.y || a?.vertices?.[0]?.y || 0
+              const bY = b?.boundingPoly?.vertices?.[0]?.y || b?.vertices?.[0]?.y || 0
+              return aY - bY
+            })
+          extractedText = sortedFields.map((f: any) => f?.inferText).join(' ')
         }
         // 2) fallback: lines[].words[].text
         if (!extractedText) {
@@ -79,7 +87,7 @@ export async function POST(request: Request) {
                 texts.push(line.words.map((w: any) => w?.text).filter(Boolean).join(' '))
               }
             }
-            extractedText = texts.filter(Boolean).join('\n')
+            extractedText = texts.filter(Boolean).join(' ')
           }
         }
         // 3) 마지막 안전망: 전체 트리에서 text/InferText 키 수집

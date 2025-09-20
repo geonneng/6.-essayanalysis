@@ -16,6 +16,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
     loading: true,
     error: null
   })
+  
+  const [isClient, setIsClient] = useState(false)
 
   const refreshUser = async () => {
     try {
@@ -43,6 +45,8 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   }
 
   useEffect(() => {
+    // 클라이언트에서만 실행되도록 설정
+    setIsClient(true)
     console.log('🔧 AuthProvider - useEffect 실행')
     refreshUser()
 
@@ -76,6 +80,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   
   const contextValue = {
     ...state,
+    isClient,
     signOut,
     refreshUser
   }

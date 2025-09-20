@@ -8,7 +8,7 @@ import { Textarea } from "@/components/ui/textarea"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
-import { Upload, FileText, BarChart3, History, CreditCard, User, LogOut, Maximize2, Minimize2 } from "lucide-react"
+import { Upload, FileText, BarChart3, History, CreditCard, User, LogOut, Maximize2, Minimize2, X, ArrowUp, ArrowDown, Plus } from "lucide-react"
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/useAuth"
@@ -19,7 +19,8 @@ export default function EssayPage() {
   const router = useRouter()
   const [credits, setCredits] = useState(25)
   const [questionFile, setQuestionFile] = useState<File | null>(null)
-  const [answerFile, setAnswerFile] = useState<File | null>(null)
+  const [answerFiles, setAnswerFiles] = useState<File[]>([])
+  const [answerFileTexts, setAnswerFileTexts] = useState<string[]>([])
   const [questionText, setQuestionText] = useState("")
   const [answerText, setAnswerText] = useState("")
   const [isAnalyzing, setIsAnalyzing] = useState(false)
@@ -44,6 +45,21 @@ export default function EssayPage() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [])
 
+  // 페이지 진입 시 분석 결과 초기화
+  useEffect(() => {
+    // 새로고침이나 페이지 재진입 시 이전 분석 결과 초기화
+    setAnalysisResult(null)
+    setRetryableError(null)
+  }, [])
+
+  // 답안 파일 텍스트가 변경될 때마다 답안 텍스트 업데이트
+  useEffect(() => {
+    if (answerFileTexts.length > 0) {
+      updateAnswerText()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [answerFileTexts])
+
   const debouncedSave = (key: string, value: string) => {
     try {
       if (saveTimerRef.current) clearTimeout(saveTimerRef.current)
@@ -67,161 +83,128 @@ export default function EssayPage() {
   // OCR 결과를 문단 단위로 자연스럽게 이어붙이기
   const formatOcrText = (input: string) => {
     if (!input) return ""
-    const lines = input.replace(/\r\n?/g, "\n").split("\n")
+    
+    // 1. 기본 정리: 연속된 공백 제거, 줄바꿈 정리
+    let text = input
+      .replace(/\r\n?/g, "\n")  // 줄바꿈 통일
+      .replace(/\n+/g, "\n")    // 연속된 줄바꿈을 하나로
+      .replace(/\s+/g, " ")     // 연속된 공백을 하나로
+      .trim()
+
+    // 2. 문장 단위로 분리하여 자연스럽게 연결
+    const sentences = text.split(/([.!?]+\s*)/)
     const paragraphs: string[] = []
-    let buffer = ""
+    let currentParagraph = ""
 
-    const shouldAddSpace = (prev: string) => {
-      if (!prev) return false
-      return !/[\.,!?:;\)]$/.test(prev)
-    }
-
-    for (const raw of lines) {
-      const line = raw.trim()
-      if (!line) {
-        if (buffer.trim()) {
-          paragraphs.push(buffer.trim())
-          buffer = ""
-        }
-        continue
-      }
-
-      if (buffer.endsWith("-")) {
-        buffer = buffer.slice(0, -1) + line.replace(/^\s+/, "")
-      } else if (!buffer) {
-        buffer = line
+    for (let i = 0; i < sentences.length; i += 2) {
+      const sentence = sentences[i]?.trim()
+      const punctuation = sentences[i + 1]?.trim()
+      
+      if (!sentence) continue
+      
+      const fullSentence = sentence + (punctuation || "")
+      
+      // 문단 구분 기준: 문장이 길거나 특정 키워드로 시작
+      const isNewParagraph = 
+        currentParagraph.length > 200 || // 문단이 충분히 길 때
+        /^(먼저|다음으로|마지막으로|첫째|둘째|셋째|넷째|다섯째)/.test(fullSentence) ||
+        /^[0-9]+[\)\.\-]/.test(fullSentence) // 번호 목록
+        
+      if (isNewParagraph && currentParagraph) {
+        paragraphs.push(currentParagraph.trim())
+        currentParagraph = fullSentence
       } else {
-        buffer += (shouldAddSpace(buffer) ? " " : "") + line
+        currentParagraph += (currentParagraph ? " " : "") + fullSentence
       }
     }
+    
+    if (currentParagraph.trim()) {
+      paragraphs.push(currentParagraph.trim())
+    }
 
-    if (buffer.trim()) paragraphs.push(buffer.trim())
     return paragraphs.join("\n\n")
   }
 
-  // 클로바 OCR의 좌표 정보를 활용하여 원본 문단 레이아웃 복원 시도
+  // 여러 파일의 OCR 결과를 순서대로 이어붙이기
+  const combineAnswerTexts = () => {
+    if (answerFileTexts.length === 0) return answerText
+    
+    const combinedTexts = answerFileTexts.filter(text => text.trim()).join("\n\n")
+    return combinedTexts || answerText
+  }
+
+  // 답안 텍스트 업데이트 (여러 파일 + 수동 입력)
+  const updateAnswerText = () => {
+    const combined = combineAnswerTexts()
+    setAnswerText(combined)
+    debouncedSave('essay_answer', combined)
+  }
+
+  // 클로바 OCR 결과를 간단하고 안정적으로 처리
   const formatOcrTextWithLayout = (rawResult: any, fallbackText: string) => {
     try {
-      if (!rawResult || typeof rawResult !== 'object') return formatOcrText(fallbackText)
-
-      type Line = { xLeft: number; yTop: number; yBottom: number; text: string }
-      const lines: Line[] = []
-
-      // 유틸: 다양한 키에서 꼭짓점 정보 추출
-      const getVertices = (obj: any): { x: number; y: number }[] | null => {
-        if (!obj || typeof obj !== 'object') return null
-        if (Array.isArray(obj?.vertices)) return obj.vertices
-        if (obj?.boundingPoly?.vertices) return obj.boundingPoly.vertices
-        if (obj?.boundingBox?.vertices) return obj.boundingBox.vertices
-        if (Array.isArray(obj?.boundingBox)) return obj.boundingBox
-        return null
+      // 1. API에서 이미 추출한 텍스트를 우선 사용 (가장 안정적)
+      if (fallbackText && fallbackText.trim()) {
+        return formatOcrText(fallbackText)
       }
 
-      // 1) images[0].lines[].words[] 기반으로 한 줄 텍스트 구성
-      const image0 = rawResult?.images?.[0]
-      if (Array.isArray(image0?.lines)) {
-        for (const ln of image0.lines) {
-          const words = Array.isArray(ln?.words) ? ln.words : []
-          const texts: string[] = []
-          let xLeft = Number.POSITIVE_INFINITY
-          let yTop = Number.POSITIVE_INFINITY
-          let yBottom = 0
-          for (const w of words) {
-            const v = getVertices(w)
-            if (v && v.length) {
-              const xs = v.map((p: any) => p?.x ?? 0)
-              const ys = v.map((p: any) => p?.y ?? 0)
-              xLeft = Math.min(xLeft, Math.min(...xs))
-              yTop = Math.min(yTop, Math.min(...ys))
-              yBottom = Math.max(yBottom, Math.max(...ys))
-            }
-            if (w?.text || w?.inferText) texts.push((w.text ?? w.inferText) as string)
-          }
-          const text = texts.join(' ').trim()
-          if (text) {
-            lines.push({ xLeft: isFinite(xLeft) ? xLeft : 0, yTop: isFinite(yTop) ? yTop : 0, yBottom: isFinite(yBottom) ? yBottom : 0, text })
+      // 2. rawResult에서 텍스트 추출 시도 (fallback)
+      if (!rawResult || typeof rawResult !== 'object') {
+        return formatOcrText(fallbackText)
+      }
+
+      let extractedText = ""
+
+      // 클로바 OCR 응답 구조에 맞게 텍스트 추출
+      if (rawResult.images && Array.isArray(rawResult.images) && rawResult.images.length > 0) {
+        const image = rawResult.images[0]
+        
+        // 방법 1: fields에서 텍스트 추출 (가장 안정적)
+        if (image.fields && Array.isArray(image.fields)) {
+          const fieldTexts = image.fields
+            .map((field: any) => field.inferText || field.text || '')
+            .filter((text: string) => text.trim())
+          
+          if (fieldTexts.length > 0) {
+            extractedText = fieldTexts.join('\n')
           }
         }
-      }
-
-      // 2) fallback: images[0].fields[]를 라인처럼 취급하여 정렬 후 합치기
-      if (!lines.length && Array.isArray(image0?.fields)) {
-        for (const f of image0.fields) {
-          const v = getVertices(f)
-          let xLeft = 0, yTop = 0, yBottom = 0
-          if (v && v.length) {
-            const xs = v.map((p: any) => p?.x ?? 0)
-            const ys = v.map((p: any) => p?.y ?? 0)
-            xLeft = Math.min(...xs)
-            yTop = Math.min(...ys)
-            yBottom = Math.max(...ys)
-          }
-          const text = (f?.inferText || f?.text || '').toString().trim()
-          if (text) {
-            lines.push({ xLeft, yTop, yBottom, text })
+        
+        // 방법 2: lines에서 텍스트 추출
+        if (!extractedText && image.lines && Array.isArray(image.lines)) {
+          const lineTexts = image.lines
+            .map((line: any) => {
+              if (line.words && Array.isArray(line.words)) {
+                return line.words
+                  .map((word: any) => word.inferText || word.text || '')
+                  .filter((text: string) => text.trim())
+                  .join(' ')
+              }
+              return line.inferText || line.text || ''
+            })
+            .filter((text: string) => text.trim())
+          
+          if (lineTexts.length > 0) {
+            extractedText = lineTexts.join('\n')
           }
         }
       }
 
-      if (!lines.length) return formatOcrText(fallbackText)
-
-      // 줄 정렬: 위→아래, 같은 행에서는 좌→우
-      lines.sort((a, b) => (a.yTop === b.yTop ? a.xLeft - b.xLeft : a.yTop - b.yTop))
-
-      // 기준 줄높이(중앙값)로 문단 분리 임계값 계산
-      const heights = lines.map(l => Math.max(8, l.yBottom - l.yTop)).sort((a, b) => a - b)
-      const medianHeight = heights[Math.floor(heights.length / 2)] || 16
-      const gapThreshold = Math.max(12, Math.round(medianHeight * 0.9))
-
-      const paragraphs: string[] = []
-      let buffer: Line[] = []
-
-      const flush = () => {
-        if (!buffer.length) return
-        // 같은 문단 내에서는 xLeft 증가를 이용해 자연스러운 공백을 추가
-        const minIndent = Math.min(...buffer.map(b => b.xLeft))
-        const parts: string[] = []
-        let prevRight = minIndent
-        for (const ln of buffer) {
-          const indent = ln.xLeft - minIndent
-          const needsSpace = parts.length > 0 && !/[\.,!?:;\)]$/.test(parts[parts.length - 1])
-          const spacer = needsSpace ? ' ' : ''
-          const indentCue = indent > medianHeight * 0.6 ? '' : '' // 필요 시 들여쓰기 마커 추가 가능
-          parts.push(spacer + indentCue + ln.text)
-          prevRight = ln.xLeft
-        }
-        paragraphs.push(parts.join(' ').replace(/\s{2,}/g, ' ').trim())
-        buffer = []
+      // 3. 추출된 텍스트가 있으면 포맷팅하여 반환
+      if (extractedText.trim()) {
+        return formatOcrText(extractedText)
       }
 
-      for (let i = 0; i < lines.length; i++) {
-        const curr = lines[i]
-        const prev = lines[i - 1]
-        if (!prev) {
-          buffer.push(curr)
-          continue
-        }
-        const verticalGap = curr.yTop - prev.yBottom
-        const newParagraphByGap = verticalGap > gapThreshold
-        const newParagraphByBullet = /^([0-9]+[\)\.\-]|[\-\u2022\u25CF\u25E6])\s+/.test(curr.text)
-        const newParagraphByIndent = (curr.xLeft - prev.xLeft) > medianHeight * 1.2
+      // 4. 모든 방법이 실패하면 fallback 텍스트 사용
+      return formatOcrText(fallbackText)
 
-        if (newParagraphByGap || newParagraphByBullet) {
-          flush()
-          buffer.push(curr)
-        } else {
-          buffer.push(curr)
-        }
-      }
-      flush()
-
-      return paragraphs.join('\n\n') || formatOcrText(fallbackText)
-    } catch {
+    } catch (error) {
+      console.error('OCR 텍스트 처리 오류:', error)
       return formatOcrText(fallbackText)
     }
   }
 
-  const processOCR = async (file: File, type: "question" | "answer") => {
+  const processOCR = async (file: File, type: "question" | "answer", fileIndex?: number) => {
     setIsProcessingOCR(true)
     setOcrProgress(0)
     setOcrStatus("이미지 업로드 중...")
@@ -250,12 +233,31 @@ export default function EssayPage() {
       setOcrProgress(100)
       setOcrStatus("완료!")
 
+      // OCR 결과 디버깅
+      console.log('OCR API 응답:', {
+        text: result.text,
+        hasRawResult: !!result.rawResult,
+        rawResultKeys: result.rawResult ? Object.keys(result.rawResult) : []
+      })
+
+      const formatted = formatOcrTextWithLayout(result.rawResult, result.text || "")
+      const extractedText = formatted || "텍스트를 추출할 수 없습니다."
+      
+      console.log('최종 추출된 텍스트:', extractedText.substring(0, 200) + '...')
+
       if (type === "question") {
-        const formatted = formatOcrTextWithLayout(result.rawResult, result.text || "")
-        setQuestionText(formatted || "텍스트를 추출할 수 없습니다.")
+        setQuestionText(extractedText)
       } else {
-        const formatted = formatOcrTextWithLayout(result.rawResult, result.text || "")
-        setAnswerText(formatted || "텍스트를 추출할 수 없습니다.")
+        // 답안의 경우 여러 파일 처리
+        if (fileIndex !== undefined) {
+          const newTexts = [...answerFileTexts]
+          newTexts[fileIndex] = extractedText
+          setAnswerFileTexts(newTexts)
+          // 답안 텍스트 자동 업데이트
+          setTimeout(() => updateAnswerText(), 100)
+        } else {
+          setAnswerText(extractedText)
+        }
       }
 
       // 1초 후 상태 초기화
@@ -277,9 +279,16 @@ export default function EssayPage() {
           "다음 상황에서 교사로서 어떻게 대응할 것인지 서술하시오.\n\n학급에서 일부 학생들이 다른 학생을 따돌리는 상황이 발생했습니다. 피해 학생은 위축되어 있고, 가해 학생들은 자신들의 행동이 잘못되었다는 것을 인식하지 못하고 있습니다.",
         )
       } else {
-        setAnswerText(
-          "이러한 상황에서 교사로서 다음과 같이 대응하겠습니다.\n\n첫째, 즉시 상황을 파악하고 피해 학생을 보호하겠습니다. 피해 학생과 개별 상담을 통해 심리적 안정을 도모하고, 필요시 상담교사나 학부모와 연계하여 지원체계를 구축하겠습니다.\n\n둘째, 가해 학생들과 개별 및 집단 상담을 실시하여 자신들의 행동이 타인에게 미치는 영향을 깨닫게 하고, 공감 능력을 기르도록 지도하겠습니다.\n\n셋째, 학급 전체를 대상으로 인권 교육과 배려 문화 조성을 위한 활동을 전개하여 재발 방지에 힘쓰겠습니다.",
-        )
+        const mockText = "이러한 상황에서 교사로서 다음과 같이 대응하겠습니다.\n\n첫째, 즉시 상황을 파악하고 피해 학생을 보호하겠습니다. 피해 학생과 개별 상담을 통해 심리적 안정을 도모하고, 필요시 상담교사나 학부모와 연계하여 지원체계를 구축하겠습니다.\n\n둘째, 가해 학생들과 개별 및 집단 상담을 실시하여 자신들의 행동이 타인에게 미치는 영향을 깨닫게 하고, 공감 능력을 기르도록 지도하겠습니다.\n\n셋째, 학급 전체를 대상으로 인권 교육과 배려 문화 조성을 위한 활동을 전개하여 재발 방지에 힘쓰겠습니다."
+        
+        if (fileIndex !== undefined) {
+          const newTexts = [...answerFileTexts]
+          newTexts[fileIndex] = mockText
+          setAnswerFileTexts(newTexts)
+          setTimeout(() => updateAnswerText(), 100)
+        } else {
+          setAnswerText(mockText)
+        }
       }
       
       alert(`OCR 처리 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}\n\nMock 데이터로 대체됩니다.`)
@@ -289,12 +298,67 @@ export default function EssayPage() {
   const handleFileUpload = (file: File, type: "question" | "answer") => {
     if (type === "question") {
       setQuestionFile(file)
+      processOCR(file, type)
     } else {
-      setAnswerFile(file)
+      // 답안의 경우 여러 파일 추가
+      const newFiles = [...answerFiles, file]
+      setAnswerFiles(newFiles)
+      
+      // 새로운 파일 텍스트 배열 확장
+      const newTexts = [...answerFileTexts, ""]
+      setAnswerFileTexts(newTexts)
+      
+      // OCR 처리 (새 파일의 인덱스 전달)
+      processOCR(file, type, newFiles.length - 1)
     }
+  }
+
+  const handleMultipleFileUpload = (files: FileList, type: "question" | "answer") => {
+    if (type === "question") {
+      // 문제는 하나의 파일만 허용
+      if (files.length > 0) {
+        handleFileUpload(files[0], type)
+      }
+    } else {
+      // 답안은 여러 파일 허용
+      const fileArray = Array.from(files)
+      const newFiles = [...answerFiles, ...fileArray]
+      setAnswerFiles(newFiles)
+      
+      // 새로운 파일 텍스트 배열 확장
+      const newTexts = [...answerFileTexts, ...Array(fileArray.length).fill("")]
+      setAnswerFileTexts(newTexts)
+      
+      // 각 파일에 대해 OCR 처리
+      fileArray.forEach((file, index) => {
+        const fileIndex = answerFiles.length + index
+        processOCR(file, type, fileIndex)
+      })
+    }
+  }
+
+  const removeAnswerFile = (index: number) => {
+    const newFiles = answerFiles.filter((_, i) => i !== index)
+    const newTexts = answerFileTexts.filter((_, i) => i !== index)
+    setAnswerFiles(newFiles)
+    setAnswerFileTexts(newTexts)
+    updateAnswerText()
+  }
+
+  const moveAnswerFile = (fromIndex: number, toIndex: number) => {
+    const newFiles = [...answerFiles]
+    const newTexts = [...answerFileTexts]
     
-    // OCR 처리 시작
-    processOCR(file, type)
+    // 파일과 텍스트를 함께 이동
+    const [movedFile] = newFiles.splice(fromIndex, 1)
+    const [movedText] = newTexts.splice(fromIndex, 1)
+    
+    newFiles.splice(toIndex, 0, movedFile)
+    newTexts.splice(toIndex, 0, movedText)
+    
+    setAnswerFiles(newFiles)
+    setAnswerFileTexts(newTexts)
+    updateAnswerText()
   }
 
   const handleAnalysis = async () => {
@@ -371,8 +435,8 @@ export default function EssayPage() {
       const savedData = sessionStorage.getItem('latestAnalysisResult')
       console.log('세션 스토리지에 저장된 데이터:', savedData)
       
-      // /analysis 페이지로 이동 (세션 스토리지만 사용)
-      router.push('/analysis')
+      // 분석 결과가 현재 페이지에 표시되도록 하고, 사용자가 원할 때 /analysis 페이지로 이동할 수 있도록 함
+      // router.push('/analysis') 제거
       
     } catch (e: any) {
       console.error('분석 오류:', e)
@@ -408,6 +472,11 @@ export default function EssayPage() {
   const handleSignOut = async () => {
     await signOut()
     router.push("/")
+  }
+
+  const clearAnalysisResult = () => {
+    setAnalysisResult(null)
+    setRetryableError(null)
   }
 
   const handleViewAnalysis = (analysisItem: any) => {
@@ -547,7 +616,7 @@ export default function EssayPage() {
                         <div
                           className={cn(
                             "border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors",
-                            answerFile && "border-primary bg-primary/5",
+                            answerFiles.length > 0 && "border-primary bg-primary/5",
                           )}
                           onClick={() => document.getElementById("answer-file")?.click()}
                         >
@@ -555,21 +624,74 @@ export default function EssayPage() {
                             id="answer-file"
                             type="file"
                             accept=".jpg,.jpeg,.png,.pdf"
+                            multiple
                             className="hidden"
-                            onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], "answer")}
+                            onChange={(e) => e.target.files && handleMultipleFileUpload(e.target.files, "answer")}
                           />
-                          {answerFile ? (
-                            <div className="flex items-center justify-center space-x-2">
-                              <FileText className="w-5 h-5 text-primary" />
-                              <span className="text-sm text-primary">{answerFile.name}</span>
+                          {answerFiles.length > 0 ? (
+                            <div className="space-y-2">
+                              <div className="flex items-center justify-center space-x-2">
+                                <FileText className="w-5 h-5 text-primary" />
+                                <span className="text-sm text-primary">{answerFiles.length}개 파일 업로드됨</span>
+                              </div>
+                              <p className="text-xs text-muted-foreground">클릭하여 추가 파일 업로드</p>
                             </div>
                           ) : (
                             <div>
                               <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
                               <p className="text-sm text-muted-foreground">답안 파일을 여기에 드래그하거나 클릭하세요</p>
+                              <p className="text-xs text-muted-foreground mt-1">여러 장의 답안을 순서대로 업로드할 수 있습니다</p>
                             </div>
                           )}
                         </div>
+                        
+                        {/* 업로드된 파일 목록 */}
+                        {answerFiles.length > 0 && (
+                          <div className="mt-3 space-y-2">
+                            <p className="text-xs font-medium text-foreground">업로드된 파일 ({answerFiles.length}개)</p>
+                            {answerFiles.map((file, index) => (
+                              <div key={index} className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
+                                <div className="flex items-center space-x-2 flex-1 min-w-0">
+                                  <FileText className="w-4 h-4 text-primary flex-shrink-0" />
+                                  <span className="text-sm text-foreground truncate">{file.name}</span>
+                                  <Badge variant="outline" className="text-xs">
+                                    {index + 1}번째
+                                  </Badge>
+                                </div>
+                                <div className="flex items-center space-x-1">
+                                  {index > 0 && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-6 w-6 p-0"
+                                      onClick={() => moveAnswerFile(index, index - 1)}
+                                    >
+                                      <ArrowUp className="w-3 h-3" />
+                                    </Button>
+                                  )}
+                                  {index < answerFiles.length - 1 && (
+                                    <Button
+                                      size="sm"
+                                      variant="ghost"
+                                      className="h-6 w-6 p-0"
+                                      onClick={() => moveAnswerFile(index, index + 1)}
+                                    >
+                                      <ArrowDown className="w-3 h-3" />
+                                    </Button>
+                                  )}
+                                  <Button
+                                    size="sm"
+                                    variant="ghost"
+                                    className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                                    onClick={() => removeAnswerFile(index)}
+                                  >
+                                    <X className="w-3 h-3" />
+                                  </Button>
+                                </div>
+                              </div>
+                            ))}
+                          </div>
+                        )}
                       </div>
                       <div>
                         <div className="flex items-center justify-between mb-2">
@@ -589,6 +711,14 @@ export default function EssayPage() {
                           }}
                           className="min-h-[360px]"
                         />
+                        {answerFiles.length > 0 && (
+                          <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                            <p className="text-xs text-blue-800 dark:text-blue-200">
+                              💡 여러 파일의 OCR 결과가 자동으로 결합되어 위 텍스트에 표시됩니다. 
+                              필요시 수동으로 편집할 수 있습니다.
+                            </p>
+                          </div>
+                        )}
                       </div>
                     </div>
                   </AccordionContent>
@@ -693,29 +823,82 @@ export default function EssayPage() {
                     <div
                       className={cn(
                         "border-2 border-dashed border-border rounded-lg p-4 text-center cursor-pointer hover:border-primary/50 transition-colors",
-                        answerFile && "border-primary bg-primary/5",
+                        answerFiles.length > 0 && "border-primary bg-primary/5",
                       )}
-                      onClick={() => document.getElementById("answer-file")?.click()}
+                      onClick={() => document.getElementById("answer-file-desktop")?.click()}
                     >
                       <input
-                        id="answer-file"
+                        id="answer-file-desktop"
                         type="file"
                         accept=".jpg,.jpeg,.png,.pdf"
+                        multiple
                         className="hidden"
-                        onChange={(e) => e.target.files?.[0] && handleFileUpload(e.target.files[0], "answer")}
+                        onChange={(e) => e.target.files && handleMultipleFileUpload(e.target.files, "answer")}
                       />
-                      {answerFile ? (
-                        <div className="flex items-center justify-center space-x-2">
-                          <FileText className="w-5 h-5 text-primary" />
-                          <span className="text-sm text-primary">{answerFile.name}</span>
+                      {answerFiles.length > 0 ? (
+                        <div className="space-y-2">
+                          <div className="flex items-center justify-center space-x-2">
+                            <FileText className="w-5 h-5 text-primary" />
+                            <span className="text-sm text-primary">{answerFiles.length}개 파일 업로드됨</span>
+                          </div>
+                          <p className="text-xs text-muted-foreground">클릭하여 추가 파일 업로드</p>
                         </div>
                       ) : (
                         <div>
                           <Upload className="w-8 h-8 text-muted-foreground mx-auto mb-2" />
                           <p className="text-sm text-muted-foreground">답안 파일을 여기에 드래그하거나 클릭하세요</p>
+                          <p className="text-xs text-muted-foreground mt-1">여러 장의 답안을 순서대로 업로드할 수 있습니다</p>
                         </div>
                       )}
                     </div>
+                    
+                    {/* 업로드된 파일 목록 */}
+                    {answerFiles.length > 0 && (
+                      <div className="mt-3 space-y-2">
+                        <p className="text-xs font-medium text-foreground">업로드된 파일 ({answerFiles.length}개)</p>
+                        {answerFiles.map((file, index) => (
+                          <div key={index} className="flex items-center justify-between p-2 bg-muted/50 rounded-lg">
+                            <div className="flex items-center space-x-2 flex-1 min-w-0">
+                              <FileText className="w-4 h-4 text-primary flex-shrink-0" />
+                              <span className="text-sm text-foreground truncate">{file.name}</span>
+                              <Badge variant="outline" className="text-xs">
+                                {index + 1}번째
+                              </Badge>
+                            </div>
+                            <div className="flex items-center space-x-1">
+                              {index > 0 && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 w-6 p-0"
+                                  onClick={() => moveAnswerFile(index, index - 1)}
+                                >
+                                  <ArrowUp className="w-3 h-3" />
+                                </Button>
+                              )}
+                              {index < answerFiles.length - 1 && (
+                                <Button
+                                  size="sm"
+                                  variant="ghost"
+                                  className="h-6 w-6 p-0"
+                                  onClick={() => moveAnswerFile(index, index + 1)}
+                                >
+                                  <ArrowDown className="w-3 h-3" />
+                                </Button>
+                              )}
+                              <Button
+                                size="sm"
+                                variant="ghost"
+                                className="h-6 w-6 p-0 text-destructive hover:text-destructive"
+                                onClick={() => removeAnswerFile(index)}
+                              >
+                                <X className="w-3 h-3" />
+                              </Button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
                   </div>
 
                   <div>
@@ -730,6 +913,14 @@ export default function EssayPage() {
                       }}
                       className="min-h-[420px] lg:min-h-[560px]"
                     />
+                    {answerFiles.length > 0 && (
+                      <div className="mt-2 p-2 bg-blue-50 dark:bg-blue-950/20 rounded-lg border border-blue-200 dark:border-blue-800">
+                        <p className="text-xs text-blue-800 dark:text-blue-200">
+                          💡 여러 파일의 OCR 결과가 자동으로 결합되어 위 텍스트에 표시됩니다. 
+                          필요시 수동으로 편집할 수 있습니다.
+                        </p>
+                      </div>
+                    )}
                   </div>
                 </CardContent>
               </Card>
@@ -862,10 +1053,23 @@ export default function EssayPage() {
             {/* Analysis Results Section */}
             <Card>
               <CardHeader>
-                <CardTitle className="flex items-center space-x-2">
-                  <BarChart3 className="w-5 h-5" />
-                  <span>분석 결과</span>
-                </CardTitle>
+                <div className="flex items-center justify-between">
+                  <div className="flex items-center space-x-2">
+                    <BarChart3 className="w-5 h-5" />
+                    <span>분석 결과</span>
+                  </div>
+                  {analysisResult && (
+                    <Button
+                      variant="ghost"
+                      size="sm"
+                      onClick={clearAnalysisResult}
+                      className="text-muted-foreground hover:text-foreground"
+                    >
+                      <X className="w-4 h-4 mr-1" />
+                      초기화
+                    </Button>
+                  )}
+                </div>
                 <CardDescription>AI가 분석한 논술 평가 결과입니다</CardDescription>
               </CardHeader>
               <CardContent>
@@ -951,6 +1155,18 @@ export default function EssayPage() {
                           </li>
                         ))}
                       </ul>
+                    </div>
+
+                    {/* 상세 결과 보기 버튼 */}
+                    <div className="pt-4 border-t border-border">
+                      <Button 
+                        onClick={() => router.push('/analysis')}
+                        className="w-full"
+                        variant="outline"
+                      >
+                        <BarChart3 className="w-4 h-4 mr-2" />
+                        상세 결과 보기
+                      </Button>
                     </div>
                   </div>
                 ) : (
