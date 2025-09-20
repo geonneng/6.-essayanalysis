@@ -63,6 +63,12 @@ export default function EssayPage() {
       localStorage.removeItem('essay_question_prev')
       localStorage.removeItem('essay_answer_prev')
     } catch {}
+    
+    // sessionStorage도 초기화 (이전 분석 결과 제거)
+    try {
+      sessionStorage.removeItem('latestAnalysisResult')
+      sessionStorage.removeItem('latestAnalysisResult_enriched')
+    } catch {}
   }, [])
 
   // 답안 파일 텍스트가 변경될 때마다 답안 텍스트 업데이트 (OCR 처리 시 즉시 업데이트하므로 제거)
@@ -93,52 +99,21 @@ export default function EssayPage() {
     }, 100)
   }
 
-  // OCR 결과를 간단하게 처리
+  // OCR 결과를 최소한으로 처리 (줄바꿈 보존)
   const formatOcrText = (input: string) => {
     if (!input) return ""
     
-    // 1. 기본 정리만 수행
+    // 1. 기본 정리만 수행 - 줄바꿈은 그대로 유지
     let text = input
       .replace(/\r\n?/g, "\n")  // 줄바꿈 통일
-      .replace(/\n+/g, "\n")    // 연속된 줄바꿈을 하나로
+      .replace(/\n{3,}/g, "\n\n")  // 3개 이상의 연속된 줄바꿈을 2개로
       .trim()
 
-    // 2. 표 추출 결과가 있는지 확인
-    if (text.includes('[표') && text.includes(']')) {
-      // 표 추출 결과는 그대로 반환 (탭으로 구분된 표 구조 유지)
-      return text
-    }
-
-    // 3. 줄 단위로 분리하여 처리
-    const lines = text.split('\n').filter(line => line.trim())
+    // 2. 각 줄의 앞뒤 공백만 제거하고 그대로 반환
+    const lines = text.split('\n')
+    const cleanedLines = lines.map(line => line.trim()).filter(line => line)
     
-    // 4. 간단한 문단 구분만 수행
-    const paragraphs: string[] = []
-    let currentParagraph = ""
-
-    for (let i = 0; i < lines.length; i++) {
-      const line = lines[i].trim()
-      if (!line) continue
-      
-      // 문단 구분 기준 (더 간단하게)
-      const isNewParagraph = 
-        /^(먼저|다음으로|마지막으로|첫째|둘째|셋째|넷째|다섯째)/.test(line) ||
-        /^[0-9]+[\)\.\-]/.test(line) // 번호 목록
-        
-      if (isNewParagraph && currentParagraph) {
-        paragraphs.push(currentParagraph.trim())
-        currentParagraph = line
-      } else {
-        // 공백으로 연결
-        currentParagraph += (currentParagraph ? " " : "") + line
-      }
-    }
-    
-    if (currentParagraph.trim()) {
-      paragraphs.push(currentParagraph.trim())
-    }
-
-    return paragraphs.join("\n\n")
+    return cleanedLines.join('\n')
   }
 
   // 여러 파일의 OCR 결과를 순서대로 이어붙이기
@@ -228,10 +203,6 @@ export default function EssayPage() {
     try {
       const formData = new FormData()
       formData.append('file', file)
-      // 문제 부분일 때만 표 추출 옵션 추가 (일시적으로 비활성화)
-      // if (type === "question") {
-      //   formData.append('extractTable', 'true')
-      // }
 
       setOcrProgress(30)
       setOcrStatus("OCR 처리 중...")
@@ -397,6 +368,10 @@ export default function EssayPage() {
       return
     }
 
+    // 새로운 분석 시작 시 이전 분석 결과 정리
+    sessionStorage.removeItem('latestAnalysisResult')
+    sessionStorage.removeItem('latestAnalysisResult_enriched')
+    
     setIsAnalyzing(true)
     setRetryableError(null) // 이전 오류 상태 초기화
 

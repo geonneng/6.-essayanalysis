@@ -4,7 +4,6 @@ export async function POST(request: Request) {
   try {
     const formData = await request.formData()
     const file = formData.get('file') as File | null
-    const extractTable = formData.get('extractTable') === 'true' // 표 추출 여부
 
     if (!file) {
       return NextResponse.json({ error: 'file 필드가 필요합니다.' }, { status: 400 })
@@ -35,8 +34,6 @@ export async function POST(request: Request) {
           format: extFromType.toUpperCase(),
           name: file.name,
           data: base64,
-          // 표 추출은 다른 방식으로 처리 (일단 일반 텍스트 추출로 테스트)
-          // templateIds: extractTable ? ['table'] : undefined,
         },
       ],
     }
@@ -80,10 +77,7 @@ export async function POST(request: Request) {
           hasLines: !!ocrData?.images?.[0]?.lines,
           linesLength: ocrData?.images?.[0]?.lines?.length || 0,
           hasFields: !!ocrData?.images?.[0]?.fields,
-          fieldsLength: ocrData?.images?.[0]?.fields?.length || 0,
-          hasTemplates: !!ocrData?.images?.[0]?.templates,
-          templatesLength: ocrData?.images?.[0]?.templates?.length || 0,
-          extractTable: extractTable
+          fieldsLength: ocrData?.images?.[0]?.fields?.length || 0
         })
         
         // 첫 번째 라인의 구조 확인
@@ -95,108 +89,74 @@ export async function POST(request: Request) {
             lineText: ocrData.images[0].lines[0].inferText || ocrData.images[0].lines[0].text
           })
         }
-        // 표 추출 결과 우선 처리 (일시적으로 비활성화)
-        // if (extractTable && ocrData?.images?.[0]?.templates) {
-        //   console.log('표 추출 결과 처리')
-        //   const templates = ocrData.images[0].templates
-        //   const tableTexts: string[] = []
-        //   
-        //   templates.forEach((template: any, index: number) => {
-        //     if (template?.templateId === 'table' && template?.fields) {
-        //       console.log(`표 ${index + 1} 필드 수:`, template.fields.length)
-        //       
-        //       // 표의 각 셀을 처리
-        //       const tableRows: string[] = []
-        //       const cellTexts = template.fields
-        //         .map((field: any) => field?.inferText || field?.text || '')
-        //         .filter((text: string) => text.trim())
-        //       
-        //       // 표를 행 단위로 구성 (간단한 방법)
-        //       if (cellTexts.length > 0) {
-        //         tableRows.push(cellTexts.join('\t')) // 탭으로 구분
-        //       }
-        //       
-        //       if (tableRows.length > 0) {
-        //         tableTexts.push(`[표 ${index + 1}]\n${tableRows.join('\n')}`)
-        //       }
-        //     }
-        //   })
-        //   
-        //   if (tableTexts.length > 0) {
-        //     extractedText = tableTexts.join('\n\n')
-        //     console.log('표 추출 완료:', extractedText.substring(0, 200))
-        //   }
-        // }
+        // 일반 텍스트 추출
+        // Clova OCR 응답 구조 우선 처리 - 가장 단순한 방법
+        // 1) images[].lines[].inferText 또는 images[].lines[].text 사용
+        const lines = ocrData?.images?.[0]?.lines
+        if (Array.isArray(lines)) {
+          console.log('처리할 라인 수:', lines.length)
+          
+          // 라인의 inferText 또는 text를 직접 사용
+          const lineTexts = lines
+            .map((line: any) => line?.inferText || line?.text || '')
+            .filter((text: string) => text.trim())
+          
+          console.log('처리된 라인 수:', lineTexts.length)
+          console.log('첫 번째 라인:', lineTexts[0]?.substring(0, 50))
+          
+          // 각 라인을 그대로 유지하여 줄바꿈 보존
+          extractedText = lineTexts.join('\n')
+        }
         
-        // 표 추출이 실패했거나 표 추출을 요청하지 않은 경우 일반 텍스트 추출
-        if (!extractedText) {
-          // Clova OCR 응답 구조 우선 처리 - 가장 단순한 방법
-          // 1) images[].lines[].inferText 또는 images[].lines[].text 사용
-          const lines = ocrData?.images?.[0]?.lines
-          if (Array.isArray(lines)) {
-            console.log('처리할 라인 수:', lines.length)
-            
-            // 라인의 inferText 또는 text를 직접 사용
-            const lineTexts = lines
-              .map((line: any) => line?.inferText || line?.text || '')
-              .filter((text: string) => text.trim())
-            
-            console.log('처리된 라인 수:', lineTexts.length)
-            console.log('첫 번째 라인:', lineTexts[0]?.substring(0, 50))
-            
+        // 2) fallback: words 배열에서 추출
+        if (!extractedText && Array.isArray(lines)) {
+          console.log('inferText가 없어서 words에서 추출 시도')
+          const lineTexts = lines
+            .filter((line: any) => line?.words && Array.isArray(line.words) && line.words.length > 0)
+            .map((line: any) => {
+              const words = line.words
+                .map((word: any) => word?.text || word?.inferText)
+                .filter(Boolean)
+              return words.join(' ')
+            })
+            .filter((text: string) => text.trim())
+          
+          if (lineTexts.length > 0) {
             extractedText = lineTexts.join('\n')
           }
-          
-          // 2) fallback: words 배열에서 추출
-          if (!extractedText && Array.isArray(lines)) {
-            console.log('inferText가 없어서 words에서 추출 시도')
-            const lineTexts = lines
-              .filter((line: any) => line?.words && Array.isArray(line.words) && line.words.length > 0)
-              .map((line: any) => {
-                const words = line.words
-                  .map((word: any) => word?.text || word?.inferText)
-                  .filter(Boolean)
-                return words.join(' ')
-              })
-              .filter((text: string) => text.trim())
-            
-            if (lineTexts.length > 0) {
-              extractedText = lineTexts.join('\n')
-            }
+        }
+        
+        // 3) fallback: fields[].inferText
+        if (!extractedText) {
+          const fields = ocrData?.images?.[0]?.fields
+          if (Array.isArray(fields)) {
+            console.log('fields에서 추출 시도')
+            const fieldTexts = fields
+              .map((f: any) => f?.inferText || f?.text)
+              .filter(Boolean)
+            extractedText = fieldTexts.join(' ')
           }
-          
-          // 3) fallback: fields[].inferText
-          if (!extractedText) {
-            const fields = ocrData?.images?.[0]?.fields
-            if (Array.isArray(fields)) {
-              console.log('fields에서 추출 시도')
-              const fieldTexts = fields
-                .map((f: any) => f?.inferText || f?.text)
-                .filter(Boolean)
-              extractedText = fieldTexts.join(' ')
+        }
+        
+        // 4) 마지막 안전망: 전체 트리에서 text/InferText 키 수집
+        if (!extractedText) {
+          const candidates: string[] = []
+          const traverse = (obj: any) => {
+            if (!obj || typeof obj !== 'object') return
+            if (Array.isArray(obj)) {
+              obj.forEach(traverse)
+              return
             }
-          }
-          
-          // 4) 마지막 안전망: 전체 트리에서 text/InferText 키 수집
-          if (!extractedText) {
-            const candidates: string[] = []
-            const traverse = (obj: any) => {
-              if (!obj || typeof obj !== 'object') return
-              if (Array.isArray(obj)) {
-                obj.forEach(traverse)
-                return
+            for (const key of Object.keys(obj)) {
+              const value = (obj as any)[key]
+              if (/infertext|text/i.test(key) && typeof value === 'string') {
+                candidates.push(value)
               }
-              for (const key of Object.keys(obj)) {
-                const value = (obj as any)[key]
-                if (/infertext|text/i.test(key) && typeof value === 'string') {
-                  candidates.push(value)
-                }
-                traverse(value)
-              }
+              traverse(value)
             }
-            traverse(ocrData)
-            extractedText = candidates.join('\n')
           }
+          traverse(ocrData)
+          extractedText = candidates.join('\n')
         }
       } catch {
         extractedText = ''
