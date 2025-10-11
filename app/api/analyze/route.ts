@@ -13,37 +13,11 @@ export async function POST(request: Request) {
     })
     
     if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey.length < 30) {
-      // Mock 데이터 반환 (API 키가 설정되지 않은 경우)
-      return NextResponse.json({
-        score: 18,
-        maxScore: 20,
-        strengths: [
-          "문제 상황에 대한 정확한 인식과 체계적인 접근",
-          "피해자 보호를 최우선으로 하는 교육적 관점",
-          "개별 상담과 집단 지도를 병행하는 균형잡힌 해결책",
-        ],
-        weaknesses: [
-          "핵심 해결 방안의 구체성이 부족",
-          "학부모 및 학교 차원의 협력 방안이 미흡",
-          "지속적 관리 방안이 부족",
-        ],
-        improvements: [
-          "핵심 해결 방안을 더 구체적으로 제시하여 실현 가능성을 높이세요. 예: '1주차: 피해 학생 개별 상담 및 보호 조치, 2주차: 가해 학생들과 개별 면담 실시, 3주차: 학급 전체 인권 교육 실시'",
-          "학부모, 동료 교사, 관리자와의 협력 체계를 명시하세요. 예: '학부모회를 통한 인권 교육 실시, 상담교사와의 협력 체계 구축, 학교 관리자의 지속적 모니터링 체계 수립'",
-          "지속적 모니터링과 사후 관리 방안을 포함하세요. 예: '월 1회 학급 분위기 조사 실시, 분기별 개별 학생 상담 일지 작성, 반기별 학부모 대상 인권 교육 실시'",
-        ],
-        detailedAnalysis: {
-          contentAnalysis: "답안은 학급 내 따돌림 상황에 대한 교육적 접근을 보여주고 있습니다. 피해자 보호와 가해자 지도를 균형있게 다루었으며, 학급 전체의 인권 교육까지 고려한 포괄적인 해결책을 제시했습니다.",
-          structureAnalysis: "논술의 내용이 논리적으로 연결되어 있으며, 첫째, 둘째, 셋째로 구분하여 체계적으로 접근했습니다. 다만, 각 단계별 핵심 내용의 구체성이 부족합니다.",
-          educationalPerspective: "교육학적 관점에서 볼 때, 개별 상담과 집단 지도를 병행하는 접근은 적절합니다. 다만, 장기적인 관점에서의 예방 교육과 지속적 모니터링 체계가 필요합니다.",
-          educationalTheory: "개별 상담과 집단 지도를 병행하는 접근은 교육학적으로 적절합니다. 다만, 학생들의 발달 단계를 고려한 차별화된 접근과 근접발달영역을 활용한 지도 방안이 필요합니다.",
-        },
-        categories: {
-          logicalStructure: 9.5,  // 더 관대하게 평가
-          spelling: 9.5,  // OCR 오류 고려하여 관대하게 평가
-          vocabulary: 9.0,  // OCR로 인한 어색한 표현 고려하여 관대하게 평가
-        },
-      })
+      return NextResponse.json({ 
+        error: 'Gemini API 키가 설정되지 않았습니다.',
+        details: '.env.local 파일에 GEMINI_API_KEY 또는 GOOGLE_GEMINI_API_KEY를 설정해주세요.',
+        hint: 'Google AI Studio(https://makersuite.google.com/app/apikey)에서 API 키를 발급받을 수 있습니다.'
+      }, { status: 400 })
     }
 
     const { questionText, answerText } = await request.json()
