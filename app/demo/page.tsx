@@ -57,8 +57,6 @@ export default function Demo() {
       target?.scrollIntoView({ block: 'center', behavior: 'smooth' })
     }, 100)
   }
-  const [isQuestionFullscreen, setIsQuestionFullscreen] = useState(false)
-  const [isAnswerFullscreen, setIsAnswerFullscreen] = useState(false)
 
   const handleFileUpload = async (file: File, type: "question" | "answer") => {
     if (type === "question") {
