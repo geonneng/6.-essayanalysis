@@ -15,6 +15,8 @@ export default function AnalysisResults() {
   const [analysisResult, setAnalysisResult] = useState<any>(null)
   const [isKakaoReady, setIsKakaoReady] = useState(false)
   const [loadError, setLoadError] = useState<string | null>(null)
+  const [sentenceImprovements, setSentenceImprovements] = useState<any[]>([])
+  const [isLoadingImprovements, setIsLoadingImprovements] = useState(false)
 
   useEffect(() => {
     // 세션 스토리지에서 분석 결과 가져오기
@@ -303,6 +305,52 @@ export default function AnalysisResults() {
 
   // 더 이상 기본(Mock) 데이터는 사용하지 않습니다
 
+  // 답안을 문장 단위로 분리하는 함수
+  const splitIntoSentences = (text: string) => {
+    if (!text) return []
+    return text
+      .replace(/\r\n?/g, '\n')
+      .split(/(?<=[\.\!\?])\s+/)
+      .map(s => s.trim())
+      .filter(Boolean)
+  }
+
+  // 문장별 개선 사항을 가져오는 함수
+  const fetchSentenceImprovements = async () => {
+    if (!analysisResult?.answerText) return
+    
+    setIsLoadingImprovements(true)
+    try {
+      console.log('Fetching sentence improvements...')
+      const response = await fetch('/api/improve-sentences', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          answerText: analysisResult.answerText,
+          weaknesses: analysisResult.weaknesses || [],
+          improvements: analysisResult.improvements || [],
+          questionText: analysisResult.questionText || ''
+        })
+      })
+      const data = await response.json()
+      console.log('Received sentence improvements:', data)
+      setSentenceImprovements(data.improvements || [])
+    } catch (error) {
+      console.error('문장 개선 사항 로드 실패:', error)
+      setSentenceImprovements([])
+    } finally {
+      setIsLoadingImprovements(false)
+    }
+  }
+
+  // 분석 결과가 로드되면 문장 개선 사항 가져오기
+  useEffect(() => {
+    if (analysisResult?.answerText && analysisResult?.weaknesses && analysisResult?.improvements) {
+      fetchSentenceImprovements()
+    }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [analysisResult])
+
   const handleNewAnalysis = () => {
     // 새로운 분석을 시작할 때 세션 스토리지 정리
     sessionStorage.removeItem('latestAnalysisResult')
@@ -482,7 +530,44 @@ export default function AnalysisResults() {
                 <div>
                   <h4 className="font-semibold text-foreground mb-2">답안</h4>
                   <div className="p-4 bg-muted/30 rounded-lg">
-                    <p className="text-foreground whitespace-pre-wrap">{analysisResult.answerText}</p>
+                    {isLoadingImprovements ? (
+                      <div className="flex items-center justify-center py-8">
+                        <div className="animate-spin rounded-full h-6 w-6 border-b-2 border-primary"></div>
+                        <span className="ml-3 text-sm text-muted-foreground">문장별 개선 사항을 분석하고 있습니다...</span>
+                      </div>
+                    ) : (
+                      <div className="space-y-8">
+                        {splitIntoSentences(analysisResult.answerText).map((sentence, idx) => {
+                          const improvement = sentenceImprovements.find(imp => imp.position === idx)
+                          return (
+                            <div key={idx} className="space-y-3">
+                              <p className="text-foreground leading-loose" style={{ lineHeight: '4' }}>
+                                {sentence}
+                              </p>
+                              {improvement && (
+                                <div className="ml-4 p-3 bg-purple-50 dark:bg-purple-950/20 rounded border-l-4 border-purple-500">
+                                  <p className="text-sm text-purple-700 dark:text-purple-300 mb-2">
+                                    <span className="font-semibold">💡 개선 제안:</span> {improvement.reason}
+                                  </p>
+                                  <div className="text-sm space-y-1">
+                                    <p className="text-gray-600 dark:text-gray-400 line-through">
+                                      {improvement.originalSentence}
+                                    </p>
+                                    <p className="text-purple-600 dark:text-purple-400 font-medium flex items-start gap-2">
+                                      <span className="flex-shrink-0">→</span>
+                                      <span>{improvement.improvedSentence}</span>
+                                    </p>
+                                    <p className="text-xs text-purple-600 dark:text-purple-400 italic mt-2">
+                                      와 같이 고쳐도 괜찮을 것 같습니다.
+                                    </p>
+                                  </div>
+                                </div>
+                              )}
+                            </div>
+                          )
+                        })}
+                      </div>
+                    )}
                   </div>
                 </div>
               </CardContent>
