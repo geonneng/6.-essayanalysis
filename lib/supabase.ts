@@ -10,7 +10,7 @@ const isDummyConfig =
   supabaseUrl.includes('example.supabase.co') ||
   supabaseAnonKey === 'dummy-key-for-testing'
 
-if (isDummyConfig) {
+if (isDummyConfig && process.env.NODE_ENV === 'development') {
   console.warn('⚠️ Supabase 설정이 누락되었거나 더미 값입니다. .env.local을 실제 프로젝트 정보로 업데이트하세요.')
 }
 
