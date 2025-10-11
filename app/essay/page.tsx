@@ -34,41 +34,11 @@ export default function EssayPage() {
   const [isAnswerFullscreen, setIsAnswerFullscreen] = useState(false)
   const saveTimerRef = useRef<NodeJS.Timeout | null>(null)
 
-  // 로컬 자동 저장 (복원은 제거)
-  // useEffect(() => {
-  //   try {
-  //     const q = localStorage.getItem('essay_question')
-  //     const a = localStorage.getItem('essay_answer')
-  //     if (q && !questionText) setQuestionText(q)
-  //     if (a && !answerText) setAnswerText(a)
-  //   } catch {}
-  //   // eslint-disable-next-line react-hooks/exhaustive-deps
-  // }, [])
-
-  // 페이지 진입 시 모든 상태 초기화
+  // 페이지 진입 시 sessionStorage만 정리 (분석 결과)
   useEffect(() => {
-    // 새로고침이나 페이지 재진입 시 모든 상태 초기화
+    // 이전 분석 결과만 제거 (텍스트는 유지)
     setAnalysisResult(null)
     setRetryableError(null)
-    setQuestionText("")
-    setAnswerText("")
-    setQuestionFile(null)
-    setAnswerFiles([])
-    setAnswerFileTexts([])
-    
-    // localStorage도 초기화
-    try {
-      localStorage.removeItem('essay_question')
-      localStorage.removeItem('essay_answer')
-      localStorage.removeItem('essay_question_prev')
-      localStorage.removeItem('essay_answer_prev')
-    } catch {}
-    
-    // sessionStorage도 초기화 (이전 분석 결과 제거)
-    try {
-      sessionStorage.removeItem('latestAnalysisResult')
-      sessionStorage.removeItem('latestAnalysisResult_enriched')
-    } catch {}
   }, [])
 
   // 답안 파일 텍스트가 변경될 때마다 답안 텍스트 업데이트 (OCR 처리 시 즉시 업데이트하므로 제거)
@@ -237,19 +207,122 @@ export default function EssayPage() {
       console.log('최종 추출된 텍스트:', extractedText.substring(0, 200) + '...')
 
       if (type === "question") {
-        setQuestionText(extractedText)
+        // 함수형 업데이트를 사용하여 항상 최신 상태 참조
+        setQuestionText(prevText => {
+          console.log('🔍 OCR 완료 - 현재 문제 텍스트 길이:', prevText?.length || 0)
+          console.log('🔍 OCR 완료 - 현재 문제 텍스트 내용:', prevText?.substring(0, 50) || '(없음)')
+          console.log('🔍 OCR 완료 - 새로 추출된 텍스트:', extractedText.substring(0, 50))
+          
+          // 기존 텍스트가 있는지 확인
+          if (prevText && prevText.trim()) {
+            const userChoice = confirm(
+              "기존에 작성된 문제 텍스트가 있습니다.\n\n" +
+              `현재 텍스트: ${prevText.substring(0, 50)}...\n\n` +
+              "「확인」을 누르면 기존 텍스트 뒤에 추가됩니다.\n" +
+              "「취소」를 누르면 기존 텍스트를 덮어씁니다.\n\n" +
+              "어떻게 하시겠습니까?"
+            )
+            
+            if (userChoice) {
+              // 추가하기
+              console.log('✅ 사용자 선택: 추가하기')
+              return prevText + "\n\n" + extractedText
+            } else {
+              // 덮어쓰기
+              console.log('✅ 사용자 선택: 덮어쓰기')
+              return extractedText
+            }
+          } else {
+            // 기존 텍스트가 없으면 그냥 설정
+            console.log('✅ 기존 텍스트 없음 - 새로 설정')
+            return extractedText
+          }
+        })
       } else {
         // 답안의 경우 여러 파일 처리
         if (fileIndex !== undefined) {
-          const newTexts = [...answerFileTexts]
-          newTexts[fileIndex] = extractedText
-          setAnswerFileTexts(newTexts)
-          // 답안 텍스트 즉시 업데이트
-          const combined = newTexts.filter(text => text.trim()).join("\n\n")
-          setAnswerText(combined)
-          debouncedSave('essay_answer', combined)
+          // 여러 파일을 순서대로 업로드하는 경우
+          // 첫 번째 파일이고 기존 텍스트가 있으면 사용자에게 물어봄
+          if (fileIndex === 0) {
+            setAnswerText(prevText => {
+              console.log('🔍 첫 번째 답안 파일 - 현재 답안 텍스트 길이:', prevText?.length || 0)
+              console.log('🔍 첫 번째 답안 파일 - 현재 답안 텍스트 내용:', prevText?.substring(0, 50) || '(없음)')
+              
+              if (prevText && prevText.trim()) {
+                const userChoice = confirm(
+                  "기존에 작성된 답안 텍스트가 있습니다.\n\n" +
+                  `현재 텍스트: ${prevText.substring(0, 50)}...\n\n` +
+                  "「확인」을 누르면 기존 텍스트 뒤에 추가됩니다.\n" +
+                  "「취소」를 누르면 기존 텍스트를 덮어씁니다.\n\n" +
+                  "어떻게 하시겠습니까?"
+                )
+                
+                if (userChoice) {
+                  // 추가하기
+                  console.log('✅ 사용자 선택: 추가하기')
+                  // answerFileTexts도 업데이트
+                  const newTexts = [...answerFileTexts]
+                  newTexts[fileIndex] = extractedText
+                  setAnswerFileTexts(newTexts)
+                  return prevText + "\n\n" + extractedText
+                } else {
+                  // 덮어쓰기
+                  console.log('✅ 사용자 선택: 덮어쓰기')
+                  // answerFileTexts 초기화 후 새 텍스트 설정
+                  setAnswerFileTexts([extractedText])
+                  return extractedText
+                }
+              } else {
+                // 기존 텍스트가 없으면 그냥 설정
+                console.log('✅ 기존 텍스트 없음 - 새로 설정')
+                const newTexts = [...answerFileTexts]
+                newTexts[fileIndex] = extractedText
+                setAnswerFileTexts(newTexts)
+                return extractedText
+              }
+            })
+          } else {
+            // 두 번째 이후 파일은 자동으로 추가 (기존 동작)
+            const newTexts = [...answerFileTexts]
+            newTexts[fileIndex] = extractedText
+            setAnswerFileTexts(newTexts)
+            // 답안 텍스트 즉시 업데이트
+            const combined = newTexts.filter(text => text.trim()).join("\n\n")
+            setAnswerText(combined)
+            debouncedSave('essay_answer', combined)
+          }
         } else {
-          setAnswerText(extractedText)
+          // 함수형 업데이트를 사용하여 항상 최신 상태 참조
+          setAnswerText(prevText => {
+            console.log('🔍 OCR 완료 - 현재 답안 텍스트 길이:', prevText?.length || 0)
+            console.log('🔍 OCR 완료 - 현재 답안 텍스트 내용:', prevText?.substring(0, 50) || '(없음)')
+            console.log('🔍 OCR 완료 - 새로 추출된 텍스트:', extractedText.substring(0, 50))
+            
+            // 단일 답안 파일 업로드의 경우
+            if (prevText && prevText.trim()) {
+              const userChoice = confirm(
+                "기존에 작성된 답안 텍스트가 있습니다.\n\n" +
+                `현재 텍스트: ${prevText.substring(0, 50)}...\n\n` +
+                "「확인」을 누르면 기존 텍스트 뒤에 추가됩니다.\n" +
+                "「취소」를 누르면 기존 텍스트를 덮어씁니다.\n\n" +
+                "어떻게 하시겠습니까?"
+              )
+              
+              if (userChoice) {
+                // 추가하기
+                console.log('✅ 사용자 선택: 추가하기')
+                return prevText + "\n\n" + extractedText
+              } else {
+                // 덮어쓰기
+                console.log('✅ 사용자 선택: 덮어쓰기')
+                return extractedText
+              }
+            } else {
+              // 기존 텍스트가 없으면 그냥 설정
+              console.log('✅ 기존 텍스트 없음 - 새로 설정')
+              return extractedText
+            }
+          })
         }
       }
 
@@ -275,16 +348,13 @@ export default function EssayPage() {
       setQuestionFile(file)
       processOCR(file, type)
     } else {
-      // 답안의 경우 여러 파일 추가
-      const newFiles = [...answerFiles, file]
-      setAnswerFiles(newFiles)
+      // 답안의 경우: 단일 파일 모드로 처리 (fileIndex 없이)
+      // 이렇게 하면 사용자에게 추가/덮어쓰기를 물어봄
+      setAnswerFiles([file])
+      setAnswerFileTexts([""])
       
-      // 새로운 파일 텍스트 배열 확장
-      const newTexts = [...answerFileTexts, ""]
-      setAnswerFileTexts(newTexts)
-      
-      // OCR 처리 (새 파일의 인덱스 전달)
-      processOCR(file, type, newFiles.length - 1)
+      // OCR 처리 (fileIndex를 전달하지 않음 = 단일 파일 모드)
+      processOCR(file, type)
     }
   }
 
@@ -347,9 +417,15 @@ export default function EssayPage() {
       return
     }
 
-    // 새로운 분석 시작 시 이전 분석 결과 정리
+    // 새로운 분석 시작 시 이전 분석 결과 및 캐시 정리
     sessionStorage.removeItem('latestAnalysisResult')
     sessionStorage.removeItem('latestAnalysisResult_enriched')
+    
+    // localStorage에 현재 텍스트를 최종 버전으로 저장 (분석 시점 스냅샷)
+    try {
+      localStorage.setItem('essay_question_analyzed', questionText)
+      localStorage.setItem('essay_answer_analyzed', answerText)
+    } catch {}
     
     setIsAnalyzing(true)
     setRetryableError(null) // 이전 오류 상태 초기화
@@ -413,6 +489,17 @@ export default function EssayPage() {
       // 저장 확인
       const savedData = sessionStorage.getItem('latestAnalysisResult')
       console.log('세션 스토리지에 저장된 데이터:', savedData)
+      
+      // 분석 완료 후 localStorage의 자동 저장 캐시 정리 (새 분석을 위해)
+      try {
+        localStorage.removeItem('essay_question')
+        localStorage.removeItem('essay_answer')
+        localStorage.removeItem('essay_question_prev')
+        localStorage.removeItem('essay_answer_prev')
+        console.log('✅ localStorage 캐시 정리 완료 (다음 분석을 위해)')
+      } catch (e) {
+        console.log('localStorage 정리 실패, 무시')
+      }
       
       // 분석 결과가 현재 페이지에 표시되도록 하고, 사용자가 원할 때 /analysis 페이지로 이동할 수 있도록 함
       // router.push('/analysis') 제거
@@ -533,7 +620,7 @@ export default function EssayPage() {
         </div>
       </header>
 
-      <div className="container mx-auto px-4 py-8">
+      <div className="container mx-auto px-4 py-8 pb-32 lg:pb-8">
         <Tabs defaultValue="analysis" className="space-y-6">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="analysis" className="flex items-center space-x-2">
