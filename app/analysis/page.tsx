@@ -319,6 +319,9 @@ export default function AnalysisResults() {
   const fetchSentenceImprovements = async () => {
     if (!analysisResult?.answerText) return
     
+    // 프론트엔드에서 사용하는 것과 동일한 방식으로 문장 분리
+    const sentences = splitIntoSentences(analysisResult.answerText)
+    
     // 답안 텍스트로 캐시 키 생성 (간단한 해시)
     const simpleHash = (str: string) => {
       let hash = 0
@@ -347,11 +350,14 @@ export default function AnalysisResults() {
     setIsLoadingImprovements(true)
     try {
       console.log('Fetching sentence improvements from API...')
+      console.log(`분리된 문장 수: ${sentences.length}`)
+      
       const response = await fetch('/api/improve-sentences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           answerText: analysisResult.answerText,
+          sentences: sentences,  // 분리된 문장 목록 전달
           weaknesses: analysisResult.weaknesses || [],
           improvements: analysisResult.improvements || [],
           questionText: analysisResult.questionText || ''
@@ -359,6 +365,7 @@ export default function AnalysisResults() {
       })
       const data = await response.json()
       console.log('Received sentence improvements:', data)
+      console.log(`개선 사항 수: ${data.improvements?.length || 0}`)
       setSentenceImprovements(data.improvements || [])
       
       // 결과를 캐시에 저장 (API 호출 절약)
@@ -582,15 +589,28 @@ export default function AnalysisResults() {
                       <div className="space-y-8">
                         {splitIntoSentences(analysisResult.answerText).map((sentence, idx) => {
                           const improvement = sentenceImprovements.find(imp => imp.position === idx)
+                          
+                          // 매칭 검증: originalSentence가 현재 문장과 일치하는지 확인
+                          const isMatched = improvement ? (
+                            improvement.originalSentence.trim() === sentence.trim()
+                          ) : false
+                          
+                          // 매칭되지 않으면 경고 로그
+                          if (improvement && !isMatched) {
+                            console.warn(`⚠️ 문장 매칭 오류 at position ${idx}:`)
+                            console.warn(`  프론트엔드: ${sentence.substring(0, 50)}...`)
+                            console.warn(`  API 응답: ${improvement.originalSentence.substring(0, 50)}...`)
+                          }
+                          
                           return (
                             <div key={idx} className="space-y-3">
                               <p 
-                                className={`text-foreground leading-loose ${improvement ? 'underline decoration-purple-500 decoration-2 underline-offset-4' : ''}`}
+                                className={`text-foreground leading-loose ${improvement && isMatched ? 'underline decoration-purple-500 decoration-2 underline-offset-4' : ''}`}
                                 style={{ lineHeight: '4' }}
                               >
                                 {sentence}
                               </p>
-                              {improvement && (
+                              {improvement && isMatched && (
                                 <div className="ml-4 p-4 bg-purple-50 dark:bg-purple-950/20 rounded-lg border-l-4 border-purple-500 shadow-sm">
                                   <p className="text-sm text-purple-700 dark:text-purple-300 mb-3 flex items-start gap-2">
                                     <span className="font-semibold flex items-center gap-1">
