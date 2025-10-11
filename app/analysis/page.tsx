@@ -541,26 +541,37 @@ export default function AnalysisResults() {
                           const improvement = sentenceImprovements.find(imp => imp.position === idx)
                           return (
                             <div key={idx} className="space-y-3">
-                              <p className="text-foreground leading-loose" style={{ lineHeight: '4' }}>
+                              <p 
+                                className={`text-foreground leading-loose ${improvement ? 'underline decoration-purple-500 decoration-2 underline-offset-4' : ''}`}
+                                style={{ lineHeight: '4' }}
+                              >
                                 {sentence}
                               </p>
                               {improvement && (
-                                <div className="ml-4 p-3 bg-purple-50 dark:bg-purple-950/20 rounded border-l-4 border-purple-500">
-                                  <p className="text-sm text-purple-700 dark:text-purple-300 mb-2">
-                                    <span className="font-semibold">💡 개선 제안:</span> {improvement.reason}
+                                <div className="ml-4 p-4 bg-purple-50 dark:bg-purple-950/20 rounded-lg border-l-4 border-purple-500 shadow-sm">
+                                  <p className="text-sm text-purple-700 dark:text-purple-300 mb-3 flex items-start gap-2">
+                                    <span className="font-semibold flex items-center gap-1">
+                                      💡 개선 제안:
+                                    </span>
+                                    <span>{improvement.reason}</span>
                                   </p>
-                                  <div className="text-sm space-y-1">
-                                    <p className="text-gray-600 dark:text-gray-400 line-through">
-                                      {improvement.originalSentence}
-                                    </p>
-                                    <p className="text-purple-600 dark:text-purple-400 font-medium flex items-start gap-2">
-                                      <span className="flex-shrink-0">→</span>
-                                      <span>{improvement.improvedSentence}</span>
-                                    </p>
-                                    <p className="text-xs text-purple-600 dark:text-purple-400 italic mt-2">
-                                      와 같이 고쳐도 괜찮을 것 같습니다.
-                                    </p>
+                                  <div className="text-sm space-y-2 bg-white dark:bg-gray-900 p-3 rounded border border-purple-200 dark:border-purple-800">
+                                    <div className="flex items-start gap-2">
+                                      <span className="text-gray-500 dark:text-gray-400 flex-shrink-0 mt-0.5">❌</span>
+                                      <p className="text-gray-600 dark:text-gray-400 line-through flex-1">
+                                        {improvement.originalSentence}
+                                      </p>
+                                    </div>
+                                    <div className="flex items-start gap-2">
+                                      <span className="text-purple-600 dark:text-purple-400 flex-shrink-0 mt-0.5">✅</span>
+                                      <p className="text-purple-600 dark:text-purple-400 font-medium flex-1">
+                                        {improvement.improvedSentence}
+                                      </p>
+                                    </div>
                                   </div>
+                                  <p className="text-xs text-purple-600 dark:text-purple-400 italic mt-3">
+                                    와 같이 고쳐도 괜찮을 것 같습니다.
+                                  </p>
                                 </div>
                               )}
                             </div>

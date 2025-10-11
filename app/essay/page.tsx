@@ -266,28 +266,7 @@ export default function EssayPage() {
       setOcrProgress(0)
       setOcrStatus("")
       
-      // 오류 발생 시 Mock 데이터 사용
-      if (type === "question") {
-        setQuestionText(
-          "다음 상황에서 교사로서 어떻게 대응할 것인지 서술하시오.\n\n학급에서 일부 학생들이 다른 학생을 따돌리는 상황이 발생했습니다. 피해 학생은 위축되어 있고, 가해 학생들은 자신들의 행동이 잘못되었다는 것을 인식하지 못하고 있습니다.",
-        )
-      } else {
-        const mockText = "이러한 상황에서 교사로서 다음과 같이 대응하겠습니다.\n\n첫째, 즉시 상황을 파악하고 피해 학생을 보호하겠습니다. 피해 학생과 개별 상담을 통해 심리적 안정을 도모하고, 필요시 상담교사나 학부모와 연계하여 지원체계를 구축하겠습니다.\n\n둘째, 가해 학생들과 개별 및 집단 상담을 실시하여 자신들의 행동이 타인에게 미치는 영향을 깨닫게 하고, 공감 능력을 기르도록 지도하겠습니다.\n\n셋째, 학급 전체를 대상으로 인권 교육과 배려 문화 조성을 위한 활동을 전개하여 재발 방지에 힘쓰겠습니다."
-        
-        if (fileIndex !== undefined) {
-          const newTexts = [...answerFileTexts]
-          newTexts[fileIndex] = mockText
-          setAnswerFileTexts(newTexts)
-          // 답안 텍스트 즉시 업데이트
-          const combined = newTexts.filter(text => text.trim()).join("\n\n")
-          setAnswerText(combined)
-          debouncedSave('essay_answer', combined)
-        } else {
-          setAnswerText(mockText)
-        }
-      }
-      
-      alert(`OCR 처리 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}\n\nMock 데이터로 대체됩니다.`)
+      alert(`OCR 처리 중 오류가 발생했습니다: ${error instanceof Error ? error.message : '알 수 없는 오류'}\n\n다시 시도해주시거나, 텍스트를 직접 입력해주세요.`)
     }
   }
 

@@ -3,26 +3,12 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 
 export async function POST(request: Request) {
   try {
-    const apiKey = process.env.GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY
     if (!apiKey || (apiKey?.length ?? 0) < 20) {
-      // 환경변수 없으면 간단한 폴백 생성
-    const { strengths = [], weaknesses = [], improvements = [], detailedAnalysis = {} } = await request.json()
-      const simple = (arr: string[]) => arr.map((s: string) => [
-        `사례: ${s.slice(0, 30)}…와 유사한 현장 장면을 2~3문장으로 제시해 주십시오.`,
-        `통계: 간단한 수치(참여율, 빈도 등)를 1개 포함해 주십시오.`,
-        `이론: 교육학 이론(예: ZPD, 사회학습이론) 중 1개를 인용해 주세요.`,
-      ])
-      return NextResponse.json({
-        strengthsDetails: simple(strengths),
-        weaknessesDetails: simple(weaknesses),
-        improvementsDetails: simple(improvements),
-        detailed: {
-          contentAnalysis: detailedAnalysis?.contentAnalysis ?? '',
-          structureAnalysis: detailedAnalysis?.structureAnalysis ?? '',
-          educationalPerspective: detailedAnalysis?.educationalPerspective ?? '',
-          educationalTheory: detailedAnalysis?.educationalTheory ?? '',
-        },
-      })
+      return NextResponse.json({ 
+        error: 'Gemini API 키가 설정되지 않았습니다.',
+        details: '.env.local 파일에 GEMINI_API_KEY 또는 GOOGLE_GEMINI_API_KEY를 설정해주세요.'
+      }, { status: 400 })
     }
 
     const { strengths = [], weaknesses = [], improvements = [], detailedAnalysis = {}, questionTitle, preferences = {} } = await request.json()
