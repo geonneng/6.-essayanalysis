@@ -28,7 +28,35 @@ export async function POST(request: Request) {
     const { strengths = [], weaknesses = [], improvements = [], detailedAnalysis = {}, questionTitle, preferences = {} } = await request.json()
 
     const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
+    
+    // 여러 모델 이름을 순차적으로 시도
+    const modelNames = [
+      'models/gemini-1.5-flash',
+      'models/gemini-1.5-pro',
+      'models/gemini-pro',
+      'gemini-1.5-flash',
+      'gemini-1.5-pro',
+      'gemini-pro'
+    ]
+    
+    let model
+    for (const modelName of modelNames) {
+      try {
+        const testModel = genAI.getGenerativeModel({ model: modelName })
+        await testModel.generateContent('test')
+        model = testModel
+        break
+      } catch (error: any) {
+        continue
+      }
+    }
+    
+    if (!model) {
+      return NextResponse.json({ 
+        error: '사용 가능한 Gemini 모델을 찾을 수 없습니다.',
+        hint: 'API 키를 확인해주세요.'
+      }, { status: 500 })
+    }
 
     const prompt = `당신은 교직논술 전문 평가자입니다. 모든 문장은 존댓말로 작성하세요.
 문항 제목: ${questionTitle || ''}
