@@ -3,9 +3,14 @@ import { GoogleGenerativeAI } from '@google/generative-ai'
 
 export async function POST(request: Request) {
   try {
-    const apiKey = process.env.GEMINI_API_KEY
+    const apiKey = process.env.GEMINI_API_KEY || process.env.GOOGLE_GEMINI_API_KEY || process.env.NEXT_PUBLIC_GEMINI_API_KEY
     console.log('API Key exists:', !!apiKey)
     console.log('API Key length:', apiKey?.length)
+    console.log('Trying env vars:', {
+      GEMINI_API_KEY: !!process.env.GEMINI_API_KEY,
+      GOOGLE_GEMINI_API_KEY: !!process.env.GOOGLE_GEMINI_API_KEY,
+      NEXT_PUBLIC_GEMINI_API_KEY: !!process.env.NEXT_PUBLIC_GEMINI_API_KEY
+    })
     
     if (!apiKey || apiKey === 'your_gemini_api_key_here' || apiKey.length < 30) {
       // Mock 데이터 반환 (API 키가 설정되지 않은 경우)
@@ -46,10 +51,72 @@ export async function POST(request: Request) {
       return NextResponse.json({ error: 'questionText and answerText are required' }, { status: 400 })
     }
 
-    const genAI = new GoogleGenerativeAI(apiKey)
-    const model = genAI.getGenerativeModel({ model: 'gemini-1.5-flash' })
+    // REST API로 사용 가능한 모델 먼저 확인
+    console.log('Fetching available models...')
+    let availableModelName = null
     
-    console.log('Attempting to call Gemini API...')
+    try {
+      const modelsResponse = await fetch(`https://generativelanguage.googleapis.com/v1beta/models?key=${apiKey}`)
+      if (modelsResponse.ok) {
+        const modelsData = await modelsResponse.json()
+        const generateContentModels = modelsData.models?.filter((m: any) => 
+          m.supportedGenerationMethods?.includes('generateContent')
+        ) || []
+        
+        console.log('Available models:', generateContentModels.map((m: any) => m.name))
+        
+        if (generateContentModels.length > 0) {
+          // 첫 번째 사용 가능한 모델 선택
+          availableModelName = generateContentModels[0].name
+          console.log('Using model:', availableModelName)
+        }
+      }
+    } catch (error) {
+      console.log('Failed to fetch models list:', error)
+    }
+    
+    // 사용 가능한 모델이 없으면 기본 모델 이름들 시도
+    const modelNamesToTry = availableModelName 
+      ? [availableModelName]
+      : [
+          'models/gemini-1.5-flash',
+          'models/gemini-1.5-pro',
+          'models/gemini-pro',
+          'gemini-1.5-flash',
+          'gemini-1.5-pro',
+          'gemini-pro'
+        ]
+    
+    const genAI = new GoogleGenerativeAI(apiKey)
+    let model
+    let lastError
+    
+    console.log('Models to try:', modelNamesToTry)
+    
+    for (const modelName of modelNamesToTry) {
+      try {
+        console.log(`Creating model instance: ${modelName}`)
+        model = genAI.getGenerativeModel({ model: modelName })
+        break // 모델 인스턴스 생성 성공
+      } catch (error: any) {
+        console.log(`Model ${modelName} creation failed:`, error.message)
+        lastError = error
+        continue
+      }
+    }
+    
+    if (!model) {
+      console.error('All models failed. Last error:', lastError)
+      return NextResponse.json({ 
+        error: '사용 가능한 Gemini 모델을 찾을 수 없습니다. API 키를 확인하거나 /api/list-models에서 사용 가능한 모델을 확인해주세요.',
+        details: lastError?.message || 'No models available',
+        hint: 'Google AI Studio(https://makersuite.google.com/app/apikey)에서 새 API 키를 발급받아보세요.',
+        checkedKeys: {
+          GEMINI_API_KEY: !!process.env.GEMINI_API_KEY,
+          GOOGLE_GEMINI_API_KEY: !!process.env.GOOGLE_GEMINI_API_KEY
+        }
+      }, { status: 500 })
+    }
 
     const prompt = `당신은 교직논술 전문 평가자입니다. 아래 문제와 답안을 바탕으로 배점 기준에 따라 점수와 피드백을 JSON으로만 반환하세요. 모든 문장은 존댓말로 작성하세요. OCR의 특성을 고려하여 실용적인 평가를 해주세요.
 
