@@ -315,13 +315,38 @@ export default function AnalysisResults() {
       .filter(Boolean)
   }
 
-  // 문장별 개선 사항을 가져오는 함수
+  // 문장별 개선 사항을 가져오는 함수 (캐싱 포함)
   const fetchSentenceImprovements = async () => {
     if (!analysisResult?.answerText) return
     
+    // 답안 텍스트로 캐시 키 생성 (간단한 해시)
+    const simpleHash = (str: string) => {
+      let hash = 0
+      for (let i = 0; i < str.length; i++) {
+        const char = str.charCodeAt(i)
+        hash = ((hash << 5) - hash) + char
+        hash = hash & hash
+      }
+      return hash.toString(36)
+    }
+    const cacheKey = `sentence_improvements_${simpleHash(analysisResult.answerText)}`
+    
+    // 캐시 확인
+    try {
+      const cached = sessionStorage.getItem(cacheKey)
+      if (cached) {
+        console.log('Using cached sentence improvements (API 호출 절약)')
+        const parsedCache = JSON.parse(cached)
+        setSentenceImprovements(parsedCache.improvements || [])
+        return
+      }
+    } catch (e) {
+      console.log('Cache read failed, fetching fresh data')
+    }
+    
     setIsLoadingImprovements(true)
     try {
-      console.log('Fetching sentence improvements...')
+      console.log('Fetching sentence improvements from API...')
       const response = await fetch('/api/improve-sentences', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -335,6 +360,14 @@ export default function AnalysisResults() {
       const data = await response.json()
       console.log('Received sentence improvements:', data)
       setSentenceImprovements(data.improvements || [])
+      
+      // 결과를 캐시에 저장 (API 호출 절약)
+      try {
+        sessionStorage.setItem(cacheKey, JSON.stringify(data))
+        console.log('Cached sentence improvements for future use')
+      } catch (e) {
+        console.log('Cache save failed, but continuing')
+      }
     } catch (error) {
       console.error('문장 개선 사항 로드 실패:', error)
       setSentenceImprovements([])
@@ -354,6 +387,16 @@ export default function AnalysisResults() {
   const handleNewAnalysis = () => {
     // 새로운 분석을 시작할 때 세션 스토리지 정리
     sessionStorage.removeItem('latestAnalysisResult')
+    // 문장 개선 캐시도 모두 정리 (새 분석용)
+    try {
+      Object.keys(sessionStorage).forEach(key => {
+        if (key.startsWith('sentence_improvements_')) {
+          sessionStorage.removeItem(key)
+        }
+      })
+    } catch (e) {
+      console.log('Cache cleanup failed, but continuing')
+    }
     router.push('/essay')
   }
 
