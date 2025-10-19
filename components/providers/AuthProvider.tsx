@@ -101,10 +101,6 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
       subscription.unsubscribe()
     }
   }, [])
-
-  if (process.env.NODE_ENV === 'development') {
-    console.log('📊 AuthProvider - 현재 인증 상태:', state)
-  }
   
   const contextValue = {
     ...state,

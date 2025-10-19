@@ -11,8 +11,6 @@ import { ClientOnly } from '@/components/ClientOnly'
 export const Header = () => {
   const { user, loading, signOut, isClient } = useAuth()
 
-  console.log('🎯 Header 렌더링 - user:', user, 'loading:', loading, 'isClient:', isClient)
-
   const handleSignOut = async () => {
     try {
       await signOut()
