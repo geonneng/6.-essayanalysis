@@ -3,7 +3,7 @@
 import { useState, useEffect } from 'react'
 import { supabase } from '@/lib/supabase'
 import { AuthUser, AuthState } from '@/lib/types/auth'
-import { getCurrentUser } from '@/lib/auth'
+import { userToAuthUser } from '@/lib/auth'
 import { AuthContext, useAuth } from '@/hooks/useAuth'
 
 interface AuthProviderProps {
@@ -21,14 +21,12 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const refreshUser = async () => {
     try {
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🔄 AuthProvider - refreshUser 호출됨')
-      }
       setState(prev => ({ ...prev, loading: true, error: null }))
-      const user = await getCurrentUser()
-      if (process.env.NODE_ENV === 'development') {
-        console.log('👤 AuthProvider - 사용자 정보:', user)
-      }
+      
+      // getSession은 로컬 캐시를 사용하므로 매우 빠름
+      const { data: { session } } = await supabase.auth.getSession()
+      const user = session?.user ? userToAuthUser(session.user) : null
+      
       setState({ user, loading: false, error: null })
     } catch (error) {
       if (process.env.NODE_ENV === 'development') {
@@ -40,13 +38,7 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
 
   const signOut = async () => {
     try {
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🚪 AuthProvider - 로그아웃 시도')
-      }
       await supabase.auth.signOut()
-      if (process.env.NODE_ENV === 'development') {
-        console.log('✅ AuthProvider - 로그아웃 성공')
-      }
       setState({ user: null, loading: false, error: null })
     } catch (error) {
       if (process.env.NODE_ENV === 'development') {
@@ -59,45 +51,28 @@ export const AuthProvider = ({ children }: AuthProviderProps) => {
   useEffect(() => {
     // 클라이언트에서만 실행되도록 설정
     setIsClient(true)
-    if (process.env.NODE_ENV === 'development') {
-      console.log('🔧 AuthProvider - useEffect 실행')
-    }
     refreshUser()
 
     const { data: { subscription } } = supabase.auth.onAuthStateChange(
       async (event, session) => {
         if (process.env.NODE_ENV === 'development') {
-          console.log('🔔 AuthProvider - Auth 상태 변경:', event, session?.user?.email)
+          console.log('🔔 Auth 상태 변경:', event, session?.user?.email)
         }
         
+        // 세션에서 직접 유저 정보 사용 (추가 API 호출 없음)
         if (event === 'SIGNED_IN' && session?.user) {
-          if (process.env.NODE_ENV === 'development') {
-            console.log('✅ AuthProvider - 로그인 이벤트 감지')
-          }
-          const user = await getCurrentUser()
-          if (process.env.NODE_ENV === 'development') {
-            console.log('👤 AuthProvider - 로그인된 사용자:', user)
-          }
+          const user = userToAuthUser(session.user)
           setState({ user, loading: false, error: null })
         } else if (event === 'SIGNED_OUT') {
-          if (process.env.NODE_ENV === 'development') {
-            console.log('🚪 AuthProvider - 로그아웃 이벤트 감지')
-          }
           setState({ user: null, loading: false, error: null })
-        } else if (event === 'TOKEN_REFRESHED') {
-          if (process.env.NODE_ENV === 'development') {
-            console.log('🔄 AuthProvider - 토큰 갱신 이벤트 감지')
-          }
-          const user = await getCurrentUser()
+        } else if (event === 'TOKEN_REFRESHED' && session?.user) {
+          const user = userToAuthUser(session.user)
           setState({ user, loading: false, error: null })
         }
       }
     )
 
     return () => {
-      if (process.env.NODE_ENV === 'development') {
-        console.log('🧹 AuthProvider cleanup')
-      }
       subscription.unsubscribe()
     }
   }, [])
