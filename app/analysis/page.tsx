@@ -480,6 +480,14 @@ export default function AnalysisResults() {
           </div>
           <div className="flex items-center space-x-2">
             <Button 
+              variant="default" 
+              size="sm" 
+              onClick={() => setIsSaveDialogOpen(true)}
+            >
+              <Save className="w-4 h-4 mr-2" />
+              분석 히스토리 저장
+            </Button>
+            <Button 
               variant="outline" 
               size="sm" 
               onClick={handleDownloadPDF}
@@ -843,29 +851,15 @@ export default function AnalysisResults() {
           </div>
 
           {/* Action Buttons */}
-          <div className="flex flex-col sm:flex-row gap-4 pt-6 no-print">
+          <div className="flex justify-center pt-6 no-print">
             <Button 
               onClick={handleNewAnalysis}
               variant="outline" 
-              className="flex-1 bg-transparent"
+              size="lg"
+              className="bg-transparent"
             >
               <ArrowLeft className="w-4 h-4 mr-2" />
               새로운 분석 시작하기
-            </Button>
-            <Button 
-              variant="outline"
-              className="flex-1 bg-transparent" 
-              onClick={() => setIsSaveDialogOpen(true)}
-            >
-              <Save className="w-4 h-4 mr-2" />
-              분석 결과 저장
-            </Button>
-            <Button 
-              className="flex-1" 
-              onClick={handleDownloadPDF}
-            >
-              <Download className="w-4 h-4 mr-2" />
-              PDF로 저장하기
             </Button>
           </div>
         </div>
