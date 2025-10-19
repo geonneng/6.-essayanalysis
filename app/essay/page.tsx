@@ -1323,6 +1323,7 @@ export default function EssayPage() {
                             strengths: item.strengths,
                             weaknesses: item.weaknesses,
                             improvements: item.improvements,
+                            categories: item.categories,
                             detailedAnalysis: item.detailed_analysis,
                             questionText: item.question_text,
                             answerText: item.answer_text,

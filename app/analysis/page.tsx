@@ -543,6 +543,7 @@ export default function AnalysisResults() {
           </Card>
 
           {/* Category Scores */}
+          {analysisResult.categories && (
           <Card>
             <CardHeader>
               <CardTitle>세부 평가 항목</CardTitle>
@@ -570,6 +571,7 @@ export default function AnalysisResults() {
               </div>
             </CardContent>
           </Card>
+          )}
 
           {/* Detailed Analysis */}
           <div className="grid md:grid-cols-1 gap-6">
@@ -805,6 +807,7 @@ export default function AnalysisResults() {
             )}
 
             {/* Score Breakdown */}
+            {analysisResult.categories && (
             <Card>
               <CardHeader>
                 <CardTitle className="flex items-center space-x-2">
@@ -848,6 +851,7 @@ export default function AnalysisResults() {
                 </div>
               </CardContent>
             </Card>
+            )}
           </div>
 
           {/* Action Buttons */}

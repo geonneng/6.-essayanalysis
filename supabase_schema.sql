@@ -11,6 +11,7 @@ CREATE TABLE analysis_history (
   strengths TEXT[] NOT NULL,
   weaknesses TEXT[] NOT NULL,
   improvements TEXT[] NOT NULL,
+  categories JSONB,
   detailed_analysis JSONB,
   created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW(),
   updated_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

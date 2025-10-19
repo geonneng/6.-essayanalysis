@@ -25,6 +25,7 @@ export async function saveAnalysisHistory(
       strengths: analysisResult.strengths,
       weaknesses: analysisResult.weaknesses,
       improvements: analysisResult.improvements,
+      categories: analysisResult.categories,
       detailed_analysis: analysisResult.detailedAnalysis
     })
     .select()

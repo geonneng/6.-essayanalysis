@@ -4,6 +4,11 @@ export interface AnalysisResult {
   strengths: string[]
   weaknesses: string[]
   improvements: string[]
+  categories?: {
+    logicalStructure: number
+    spelling: number
+    vocabulary: number
+  }
   detailedAnalysis?: {
     contentAnalysis: string
     structureAnalysis: string
@@ -28,6 +33,11 @@ export interface AnalysisHistory {
   strengths: string[]
   weaknesses: string[]
   improvements: string[]
+  categories?: {
+    logicalStructure: number
+    spelling: number
+    vocabulary: number
+  }
   detailed_analysis?: {
     contentAnalysis: string
     structureAnalysis: string
