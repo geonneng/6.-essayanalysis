@@ -6,8 +6,11 @@ import { Button } from "@/components/ui/button"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Progress } from "@/components/ui/progress"
-import { ArrowLeft, BarChart3, Download, Share2, FileText, CheckCircle, AlertTriangle, Lightbulb } from "lucide-react"
+import { ArrowLeft, BarChart3, Download, Share2, FileText, CheckCircle, AlertTriangle, Lightbulb, Save } from "lucide-react"
 import { useRouter } from "next/navigation"
+import { SaveAnalysisDialog } from "@/components/analysis/SaveAnalysisDialog"
+import { saveAnalysisHistory } from "@/lib/analysisHistory"
+import { toast } from "sonner"
 // PDF 라이브러리 제거 - 브라우저 내장 인쇄 기능 사용
 
 export default function AnalysisResults() {
@@ -17,6 +20,7 @@ export default function AnalysisResults() {
   const [loadError, setLoadError] = useState<string | null>(null)
   const [sentenceImprovements, setSentenceImprovements] = useState<any[]>([])
   const [isLoadingImprovements, setIsLoadingImprovements] = useState(false)
+  const [isSaveDialogOpen, setIsSaveDialogOpen] = useState(false)
 
   useEffect(() => {
     // 세션 스토리지에서 분석 결과 가져오기
@@ -849,6 +853,14 @@ export default function AnalysisResults() {
               새로운 분석 시작하기
             </Button>
             <Button 
+              variant="outline"
+              className="flex-1 bg-transparent" 
+              onClick={() => setIsSaveDialogOpen(true)}
+            >
+              <Save className="w-4 h-4 mr-2" />
+              분석 결과 저장
+            </Button>
+            <Button 
               className="flex-1" 
               onClick={handleDownloadPDF}
             >
@@ -859,6 +871,20 @@ export default function AnalysisResults() {
         </div>
       </div>
     </div>
+
+    <SaveAnalysisDialog
+      open={isSaveDialogOpen}
+      onOpenChange={setIsSaveDialogOpen}
+      onSave={async (title, memo) => {
+        const { error } = await saveAnalysisHistory(analysisResult, title, memo)
+        if (error) {
+          toast.error('저장 실패: ' + error.message)
+        } else {
+          toast.success('분석 결과가 저장되었습니다!')
+          router.push('/essay?tab=history')
+        }
+      }}
+    />
     </>
   )
 }

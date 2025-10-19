@@ -12,11 +12,14 @@ import { Upload, FileText, BarChart3, History, CreditCard, User, LogOut, Maximiz
 import { Accordion, AccordionContent, AccordionItem, AccordionTrigger } from "@/components/ui/accordion"
 import { cn } from "@/lib/utils"
 import { useAuth } from "@/hooks/useAuth"
-import { useRouter } from "next/navigation"
+import { useRouter, useSearchParams } from "next/navigation"
+import { getAnalysisHistory } from "@/lib/analysisHistory"
+import type { AnalysisHistory } from "@/lib/types/analysis"
 
 export default function EssayPage() {
   const { user, signOut } = useAuth()
   const router = useRouter()
+  const searchParams = useSearchParams()
   const [credits, setCredits] = useState(25)
   const [questionFile, setQuestionFile] = useState<File | null>(null)
   const [answerFiles, setAnswerFiles] = useState<File[]>([])
@@ -25,7 +28,9 @@ export default function EssayPage() {
   const [answerText, setAnswerText] = useState("")
   const [isAnalyzing, setIsAnalyzing] = useState(false)
   const [analysisResult, setAnalysisResult] = useState<any>(null)
-  const [analysisHistory, setAnalysisHistory] = useState<any[]>([])
+  const [analysisHistory, setAnalysisHistory] = useState<AnalysisHistory[]>([])
+  const [isLoadingHistory, setIsLoadingHistory] = useState(true)
+  const [activeTab, setActiveTab] = useState("analysis")
   const [retryableError, setRetryableError] = useState<string | null>(null)
   const [isProcessingOCR, setIsProcessingOCR] = useState(false)
   const [ocrProgress, setOcrProgress] = useState(0)
@@ -40,6 +45,33 @@ export default function EssayPage() {
     setAnalysisResult(null)
     setRetryableError(null)
   }, [])
+
+  // URL 파라미터로 탭 전환
+  useEffect(() => {
+    const tab = searchParams?.get('tab')
+    if (tab) {
+      setActiveTab(tab)
+    }
+  }, [searchParams])
+
+  // 히스토리 로드
+  useEffect(() => {
+    loadHistory()
+  }, [user])
+
+  const loadHistory = async () => {
+    if (!user) {
+      setIsLoadingHistory(false)
+      return
+    }
+    
+    setIsLoadingHistory(true)
+    const { data, error } = await getAnalysisHistory()
+    if (!error && data) {
+      setAnalysisHistory(data)
+    }
+    setIsLoadingHistory(false)
+  }
 
   // 답안 파일 텍스트가 변경될 때마다 답안 텍스트 업데이트 (OCR 처리 시 즉시 업데이트하므로 제거)
   // useEffect(() => {
@@ -461,14 +493,6 @@ export default function EssayPage() {
       setAnalysisResult(result)
       setCredits(prev => prev - 1)
       
-      // 분석 히스토리에 추가
-      const newHistoryItem = {
-        id: Date.now(),
-        ...result,
-        createdAt: new Date().toISOString(),
-      }
-      setAnalysisHistory(prev => [newHistoryItem, ...prev])
-      
       // 분석 결과와 함께 문제/답안 텍스트도 저장
       const analysisData = {
         ...result,
@@ -570,13 +594,6 @@ export default function EssayPage() {
     } catch {}
   }
 
-  const handleViewAnalysis = (analysisItem: any) => {
-    console.log('히스토리에서 선택된 분석 아이템:', analysisItem)
-    // 세션 스토리지에 저장 (이전 데이터 덮어쓰기)
-    sessionStorage.setItem('latestAnalysisResult', JSON.stringify(analysisItem))
-    console.log('히스토리 데이터를 세션 스토리지에 저장 완료')
-    router.push('/analysis')
-  }
 
   return (
     <div className="min-h-screen bg-background">
@@ -621,7 +638,7 @@ export default function EssayPage() {
       </header>
 
       <div className="container mx-auto px-4 py-8 pb-32 lg:pb-8">
-        <Tabs defaultValue="analysis" className="space-y-6">
+        <Tabs value={activeTab} onValueChange={setActiveTab} className="space-y-6">
           <TabsList className="grid w-full grid-cols-3">
             <TabsTrigger value="analysis" className="flex items-center space-x-2">
               <BarChart3 className="w-4 h-4" />
@@ -1284,46 +1301,72 @@ export default function EssayPage() {
             <Card>
               <CardHeader>
                 <CardTitle>분석 히스토리</CardTitle>
-                <CardDescription>이전에 분석받았던 논술 내역을 확인할 수 있습니다</CardDescription>
+                <CardDescription>저장한 분석 결과를 확인할 수 있습니다</CardDescription>
               </CardHeader>
               <CardContent>
-                {analysisHistory.length > 0 ? (
-                  <div className="space-y-4">
+                {isLoadingHistory ? (
+                  <div className="text-center py-8 text-muted-foreground">
+                    <div className="animate-spin rounded-full h-8 w-8 border-b-2 border-primary mx-auto mb-4"></div>
+                    <p>히스토리를 불러오는 중...</p>
+                  </div>
+                ) : analysisHistory.length > 0 ? (
+                  <div className="space-y-3">
                     {analysisHistory.map((item) => (
                       <div
                         key={item.id}
                         className="flex items-center justify-between p-4 border border-border rounded-lg hover:bg-muted/50 transition-colors cursor-pointer"
-                        onClick={() => handleViewAnalysis(item)}
+                        onClick={() => {
+                          // AnalysisResult 형식으로 변환하여 저장
+                          const result = {
+                            score: item.score,
+                            maxScore: item.max_score,
+                            strengths: item.strengths,
+                            weaknesses: item.weaknesses,
+                            improvements: item.improvements,
+                            detailedAnalysis: item.detailed_analysis,
+                            questionText: item.question_text,
+                            answerText: item.answer_text,
+                            questionTitle: item.title,
+                            analysisDate: new Date(item.created_at).toLocaleDateString('ko-KR')
+                          }
+                          sessionStorage.setItem('latestAnalysisResult', JSON.stringify(result))
+                          router.push('/analysis')
+                        }}
                       >
-                        <div className="flex items-center space-x-4">
-                          <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
-                            <BarChart3 className="w-5 h-5 text-primary" />
+                        <div className="flex-1">
+                          <div className="flex items-center space-x-3 mb-2">
+                            <div className="w-10 h-10 bg-primary/10 rounded-lg flex items-center justify-center">
+                              <FileText className="w-5 h-5 text-primary" />
+                            </div>
+                            <div className="flex-1">
+                              <h4 className="font-medium text-foreground">{item.title}</h4>
+                              <div className="flex items-center gap-4 mt-1 text-sm text-muted-foreground">
+                                <span>{new Date(item.created_at).toLocaleDateString('ko-KR', {
+                                  year: 'numeric',
+                                  month: 'long',
+                                  day: 'numeric'
+                                })}</span>
+                                <Badge variant="secondary" className="font-semibold">
+                                  {item.score}/{item.max_score}점
+                                </Badge>
+                              </div>
+                            </div>
                           </div>
-                          <div>
-                            <h4 className="font-medium text-foreground">
-                              {item.questionTitle}
-                            </h4>
-                            <p className="text-sm text-muted-foreground">
-                              {item.analysisDate}
-                            </p>
-                          </div>
+                          {item.memo && (
+                            <p className="text-sm text-muted-foreground ml-13 pl-1">{item.memo}</p>
+                          )}
                         </div>
-                        <div className="flex items-center space-x-4">
-                          <Badge variant="secondary" className="text-lg px-3 py-1">
-                            {item.score}/{item.maxScore}
-                          </Badge>
-                          <Button variant="ghost" size="sm">
-                            결과 보기
-                          </Button>
-                        </div>
+                        <Button variant="ghost" size="sm">
+                          결과 보기
+                        </Button>
                       </div>
                     ))}
                   </div>
                 ) : (
                   <div className="text-center py-8 text-muted-foreground">
                     <History className="w-12 h-12 mx-auto mb-4 opacity-50" />
-                    <p>분석 히스토리가 없습니다</p>
-                    <p className="text-sm mt-2">논술을 분석하면 히스토리에 저장됩니다</p>
+                    <p>저장된 분석 결과가 없습니다</p>
+                    <p className="text-sm mt-2">분석 결과 페이지에서 저장 버튼을 눌러보세요</p>
                   </div>
                 )}
               </CardContent>
