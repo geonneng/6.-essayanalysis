@@ -12,10 +12,17 @@ export async function POST(request: Request) {
       })
     }
 
-    const { answerText, weaknesses, improvements, questionText } = await request.json()
+    const { answerText, sentences, weaknesses, improvements, questionText } = await request.json()
     
     if (!answerText) {
       return NextResponse.json({ error: 'answerText is required' }, { status: 400 })
+    }
+    
+    // 프론트엔드에서 전달받은 문장 목록 사용 (정확한 매칭을 위해)
+    const sentenceList = sentences || []
+    console.log(`📝 받은 문장 수: ${sentenceList.length}`)
+    if (sentenceList.length > 0) {
+      console.log(`📝 첫 번째 문장: ${sentenceList[0]?.substring(0, 50)}...`)
     }
 
     // REST API로 사용 가능한 모델 먼저 확인
@@ -97,8 +104,11 @@ export async function POST(request: Request) {
 **문제:**
 ${questionText || '제공되지 않음'}
 
-**답안:**
+**답안 (전체):**
 ${answerText}
+
+**답안 (문장별로 분리됨):**
+${sentenceList.map((s: string, idx: number) => `[${idx}] ${s}`).join('\n')}
 
 **기존 보완점:**
 ${JSON.stringify(weaknesses || [])}
@@ -106,7 +116,8 @@ ${JSON.stringify(weaknesses || [])}
 **기존 개선 방안:**
 ${JSON.stringify(improvements || [])}
 
-답안을 문장 단위로 매우 꼼꼼하게 분석하여, 개선이 필요한 모든 문장에 대해 다음 JSON 형식으로 반환하세요.
+위에 제공된 **답안 (문장별로 분리됨)** 목록을 사용하여 매우 꼼꼼하게 분석하세요.
+각 문장의 번호 [0], [1], [2] 등을 position으로 사용하세요.
 중요: 가능한 한 많은 개선 사항을 찾아주세요 (8-12개 정도, 사소한 문제도 포함).
 
 {
@@ -121,13 +132,17 @@ ${JSON.stringify(improvements || [])}
 }
 
 **주의사항:**
-- position은 답안에서 문장의 순서 번호입니다 (0부터 시작)
-- originalSentence는 답안에서 해당 문장을 정확히 복사하세요
+- position은 위의 [번호]와 정확히 일치해야 합니다 (0부터 시작)
+- originalSentence는 위의 분리된 문장 목록에서 해당 번호의 문장을 **정확히 그대로** 복사하세요
 - improvedSentence는 구체적이고 명확하게 수정된 문장을 제시하세요
 - reason은 왜 이렇게 수정해야 하는지 간단히 설명하세요 (맞춤법/문법/표현/구조/논리 등 명시)
 - 작은 문제라도 개선 가능한 모든 문장을 포함하세요
 - 8-12개의 개선 사항을 목표로 하세요 (꼼꼼한 분석)
-- 맞춤법, 문법, 표현, 구조, 논리 등 모든 측면을 검토하세요`
+- 맞춤법, 문법, 표현, 구조, 논리 등 모든 측면을 검토하세요
+
+**예시:**
+입력: [0] 이러한 상황에서 교사로서 다음과 같이 대응하겠습니다.
+출력: {"position": 0, "originalSentence": "이러한 상황에서 교사로서 다음과 같이 대응하겠습니다.", ...}`
 
     console.log('Generating sentence improvements with detailed analysis...')
     const result = await model.generateContent(prompt)
